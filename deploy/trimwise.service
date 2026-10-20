@@ -1,0 +1,20 @@
+[Unit]
+Description=TrimWise 节流教练（FastAPI：静态页面 + AI 代理）
+After=network.target
+
+[Service]
+Type=simple
+User=trimwise
+Group=trimwise
+WorkingDirectory=/srv/trimwise/app
+Environment=DB_PATH=/srv/trimwise/data/trimwise.db
+Environment=TZ=Asia/Shanghai
+# 只监听本机，由 Caddy 对外提供 HTTPS
+ExecStart=/srv/trimwise/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8200 --workers 2 --proxy-headers
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

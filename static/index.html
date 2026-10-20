@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TrimWise 节流教练</title>
+  <meta name="description" content="导入随手记、微信、支付宝账单，找出无感支出、订阅黑洞和冲动消费，把节流变成一套可执行的计划。数据只在你的浏览器里。">
+  <meta name="theme-color" content="#0f7b6c">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="#overview">TrimWise <span>节流教练</span></a>
+  <nav id="nav" class="nav hidden">
+    <a href="#overview">体检</a>
+    <a href="#opps">可砍清单</a>
+    <a href="#plan">节流计划</a>
+    <a href="#cooling">冷静期</a>
+    <a href="#coach">AI 教练</a>
+    <a href="#data">数据</a>
+  </nav>
+  <button id="btn-import" class="primary small-btn hidden">导入账单</button>
+</header>
+
+<div id="demo-bar" class="demo-bar hidden">
+  正在看演示数据（一个上海三口之家，6 年流水，最近一年支出约 73 万）。<a href="#" data-action="import">导入我自己的账单</a> · <a href="#" data-action="exit-demo">退出演示</a>
+</div>
+
+<!-- 首页（还没有数据） -->
+<section id="landing" class="landing hidden">
+  <div class="hero">
+    <h1>别再凭感觉砍，<br>让你的流水告诉你钱漏在哪。</h1>
+    <p class="lead">TrimWise 不是又一个记账 App。把随手记、微信、支付宝的账单导进来，它会找出<b>无感的小额高频</b>、<b>还在扣钱的订阅</b>、<b>深夜冲动的大额消费</b>和<b>悄悄膨胀的分类</b>，算出每一项一年能省多少，再陪你把它变成每月一张消费卡。</p>
+    <div class="loop"><span>导入流水</span><i>→</i><span>支出体检</span><i>→</i><span>可砍清单</span><i>→</i><span>每月消费卡</span><i>→</i><span>自由基金</span></div>
+    <div class="cta">
+      <button class="primary big" data-action="import">导入我的账单</button>
+      <button class="big" data-action="demo">先看演示数据</button>
+    </div>
+    <p class="muted small">🔒 流水只在你的浏览器里解析和保存，不上传服务器。AI 教练只收到按月、按分类的汇总，发送前你可以看到完整内容。</p>
+  </div>
+
+  <div class="principles">
+    <div class="card"><h3>不砍生活品质</h3><p>房租、阿姨、孩子必需品、保险是高品质生活的基石，不建议砍，只优化单价。</p></div>
+    <div class="card"><h3>只砍“无意识”的部分</h3><p>单笔不心疼的外卖打车、忘了取消的会员、焦虑时下的单，是降支出最不痛的地方。</p></div>
+    <div class="card"><h3>数字由代码算，AI 只负责说人话</h3><p>每一项可省金额都是确定性规则算出来的，可以追溯到具体交易；AI 不编数字。</p></div>
+  </div>
+
+  <h2 class="section-title">怎么导出账单</h2>
+  <div class="guides">
+    <details class="card"><summary><b>随手记</b>（推荐：一次导出全部历史）</summary>
+      <ol>
+        <li>电脑打开随手记网页版，登录后进入「导入导出 → 数据导出」，选择全部时间，导出 Excel。App 里「更多 → 导入导出 → 导出数据」也可以（需要会员）。</li>
+        <li>拿到的 Excel 里按“支出 / 收入 / 转账”分了多个工作表，直接整个文件拖进来即可。</li>
+      </ol>
+    </details>
+    <details class="card"><summary><b>微信支付</b>（每次最多 3 个月）</summary>
+      <ol>
+        <li>微信「我 → 服务 → 钱包 → 账单 → 常见问题 → 下载账单 → 用于个人对账」，选时间范围，填邮箱。</li>
+        <li>邮箱会收到一个加密 zip，解压密码在「微信支付」公众号消息里。</li>
+        <li><b>不用自己解压</b>：把 zip 直接拖进来，按提示输入密码。多个月份的 zip 可以一起拖。</li>
+      </ol>
+    </details>
+    <details class="card"><summary><b>支付宝</b>（每次最多 1 年）</summary>
+      <ol>
+        <li>支付宝「我的 → 账单 → 右上角 ··· → 开具交易流水证明 → 用于个人对账」，选时间范围，填邮箱。</li>
+        <li>解压密码在支付宝消息或开具记录里。zip 直接拖进来，输入密码即可。</li>
+      </ol>
+    </details>
+    <details class="card"><summary><b>其他记账 App / 银行流水</b></summary>
+      <p>鲨鱼记账、钱迹、一木记账等导出的 Excel / CSV，以及银行导出的流水，只要有“日期”和“金额”两列就能导入；有“分类”“备注”“商户”列会分析得更准。</p>
+    </details>
+  </div>
+  <p class="muted small">建议：随手记记全了就只导随手记；如果同时导入微信 / 支付宝，同一笔钱可能被算两次，导入时会提示重叠情况。</p>
+</section>
+
+<main id="app" class="hidden"><div id="view"></div></main>
+
+<footer class="footer">
+  <p>数据只保存在这台设备的浏览器里 · <span id="disclosure">AI 功能由 DeepSeek 大模型提供</span> · 本工具只做支出分析与习惯辅助，不提供投资建议</p>
+</footer>
+
+<input type="file" id="file-input" multiple accept=".csv,.xlsx,.xls,.zip,.txt" hidden>
+
+<!-- 导入 -->
+<dialog id="dlg-import" class="wide">
+  <h3>导入账单</h3>
+  <div id="drop" class="drop">
+    <p><b>把文件拖到这里</b>，或 <a href="#" id="pick">选择文件</a></p>
+    <p class="muted small">支持随手记 Excel、微信 / 支付宝账单（加密 zip 也可以）、通用 CSV / Excel，可以一次选多个。文件只在本机解析。</p>
+  </div>
+  <div id="import-result"></div>
+  <div class="dlg-actions">
+    <button data-close>取消</button>
+    <button id="import-confirm" class="primary" disabled>导入</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-password">
+  <h3>输入解压密码</h3>
+  <p class="muted small" id="pw-hint"></p>
+  <input id="pw-input" type="password" autocomplete="off" placeholder="微信：看「微信支付」公众号；支付宝：看开具记录">
+  <p class="error" id="pw-error"></p>
+  <div class="dlg-actions"><button data-close value="cancel">取消</button><button id="pw-ok" class="primary">解压</button></div>
+</dialog>
+
+<dialog id="dlg-consent">
+  <h3>使用 AI 教练前，请确认</h3>
+  <ul class="consent">
+    <li>AI 教练会把你的<b>支出汇总</b>发送给服务器，再由服务器转给大模型（DeepSeek）生成复盘和回答。</li>
+    <li>发送的是按月、按分类的金额、可砍清单和计划；<b>不发送逐笔流水、账户、订单号</b>。是否附带商户名称可以在「数据 → 设置」里关闭。</li>
+    <li>服务器不保存你发送的内容，只记录调用次数和成本，用于限流。</li>
+    <li>每次发送前都可以点「查看将发送的内容」核对。</li>
+  </ul>
+  <label class="check"><input type="checkbox" id="consent-check"> 我已了解，同意把支出汇总发送给 AI 处理</label>
+  <div class="dlg-actions"><button data-close>暂不使用</button><button id="consent-ok" class="primary" disabled>同意并继续</button></div>
+</dialog>
+
+<div id="tip" class="tooltip hidden"></div>
+<div id="toast" class="toast hidden"></div>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

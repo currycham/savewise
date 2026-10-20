@@ -1,0 +1,11 @@
+#!/bin/sh
+# 每天备份 SQLite（只有 AI 调用记账，没有用户数据）（在线热备份，不停服务），保留 14 天。由 setup-server.sh 安装到 /etc/cron.daily/
+set -e
+DIR=/srv/trimwise/backup
+DB=/srv/trimwise/data/trimwise.db
+[ -f "$DB" ] || exit 0
+mkdir -p "$DIR"
+sqlite3 "$DB" ".backup '$DIR/trimwise-$(date +%F).db'"
+gzip -f "$DIR/trimwise-$(date +%F).db"
+find "$DIR" -name 'trimwise-*.db.gz' -mtime +14 -delete
+chown -R trimwise:trimwise "$DIR"
