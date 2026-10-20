@@ -6,7 +6,7 @@ import secrets
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -388,12 +388,13 @@ def ai_classify(body: ClassifyBody, user: dict = Depends(current_user)):
 # ---------- 后台 ----------
 
 def admin(token: str) -> None:
+    """口令放在请求头 X-Admin-Token 里（放在 URL 里会进访问日志）。"""
     if not ADMIN_TOKEN or not secrets.compare_digest(token, ADMIN_TOKEN):
         raise HTTPException(404, "Not Found")
 
 
 @app.get("/api/admin/stats")
-def admin_stats(token: str = ""):
+def admin_stats(token: str = Header("", alias="X-Admin-Token")):
     admin(token)
     with get_conn() as conn:
         days = [dict(r) for r in conn.execute(
@@ -410,7 +411,7 @@ def admin_stats(token: str = ""):
 
 
 @app.post("/api/admin/weekly-run")
-def admin_weekly_run(token: str = ""):
+def admin_weekly_run(token: str = Header("", alias="X-Admin-Token")):
     """手动补跑周一的定时任务（已经发过的不会重复发）。"""
     admin(token)
     return weekly.run()
@@ -431,6 +432,6 @@ def manifest():
     return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def index():
     return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})

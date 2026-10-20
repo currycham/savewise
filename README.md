@@ -135,7 +135,7 @@ node --test tests/*.test.mjs
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` | 发每周复盘邮件和找回密码。不填就只能在页面上看每周复盘 |
 | `WEEKLY_RUN_TIME` | 每周一几点跑定时复盘，默认 08:00 |
 | `MODEL_DISCLOSURE` | 页面底部公示的模型和登记信息 |
-| `ADMIN_TOKEN` | `/api/admin/stats?token=` 查看用户数、每周复盘和 AI 成本；`POST /api/admin/weekly-run?token=` 手动补跑定时复盘 |
+| `ADMIN_TOKEN` | 请求头 `X-Admin-Token` 带上它：`GET /api/admin/stats` 查看用户数、每周复盘和 AI 成本；`POST /api/admin/weekly-run` 手动补跑定时复盘 |
 
 ## 部署
 
