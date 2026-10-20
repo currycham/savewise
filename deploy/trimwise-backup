@@ -1,5 +1,5 @@
 #!/bin/sh
-# 每天备份 SQLite（只有 AI 调用记账，没有用户数据）（在线热备份，不停服务），保留 14 天。由 setup-server.sh 安装到 /etc/cron.daily/
+# 每天备份 SQLite（账号、云同步密文、每周汇总和复盘、AI 记账）（在线热备份，不停服务），保留 14 天。由 setup-server.sh 安装到 /etc/cron.daily/
 set -e
 DIR=/srv/trimwise/backup
 DB=/srv/trimwise/data/trimwise.db

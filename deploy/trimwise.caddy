@@ -3,9 +3,9 @@
 trimwise.waywise.tech {
 	encode zstd gzip
 
-	# 账单文件在浏览器里解析，不上传；AI 接口只收汇总，1MB 足够
+	# 账单文件在浏览器里解析，不上传；云同步上传的是压缩加密后的数据，6 年流水通常不到 2MB
 	request_body {
-		max_size 1MB
+		max_size 16MB
 	}
 
 	reverse_proxy 127.0.0.1:8200

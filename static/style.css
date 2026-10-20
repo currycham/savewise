@@ -248,3 +248,32 @@ dialog h3 { margin: 0 0 12px; }
 }
 .detail-filter { grid-template-columns: 2fr 1fr 1fr; }
 @media (max-width: 600px) { .detail-filter { grid-template-columns: 1fr; } }
+
+/* 账号 */
+.login-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-left: 4px solid var(--primary); }
+.login-card h2 { margin: 0 0 4px; }
+.login-card p { margin: 0; }
+.benefits { margin: 0; padding-left: 20px; }
+.benefits li { margin-bottom: 4px; }
+.acc-form label { display: block; margin-bottom: 10px; }
+.acc-form input { width: 100%; }
+#acc-note { margin: 10px 0 0; }
+#btn-account { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+
+/* 每周目标 */
+.wgoals { display: grid; gap: 8px; margin: 4px 0 12px; }
+.wgoal { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: 8px; background: var(--neutral-bg); margin: 0; }
+.wgoal .mark { width: 20px; flex: none; text-align: center; font-weight: 700; color: var(--muted); }
+.wgoal.done .mark, .wgoal.done > input + div { color: var(--good); }
+.wgoal.miss .mark { color: var(--bad); }
+.wgoal.check { cursor: pointer; }
+.wgoal.check input { margin-top: 4px; }
+.wgoal .grow { flex: 1; min-width: 0; }
+.wgoal .bar { margin: 6px 0 2px; background: var(--card); }
+.center { text-align: center; }
+@media (max-width: 760px) {
+  /* 手机：导航单独一行，可以横向滑动 */
+  .topbar { flex-wrap: wrap; row-gap: 6px; padding-bottom: 6px; }
+  .topbar .nav { order: 3; flex-basis: 100%; }
+  #btn-account { max-width: 110px; }
+}

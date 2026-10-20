@@ -1,3 +1,4 @@
+import * as acct from "./account.js";
 import * as ai from "./ai.js";
 import { KINDS, TAXONOMY, defaultKind } from "./categorize.js";
 import { barChart, ledgerChart, lineChart, stackBar } from "./charts.js";
@@ -8,19 +9,28 @@ import { isSpend, opportunities, overview, spend, totalSaving } from "./analyze.
 import { SOURCES, txKey } from "./parse.js";
 import { cardLedger, defaultPlan, freedomFund, lumpyStatus } from "./plan.js";
 import * as store from "./store.js";
-import { addMonths, groupBy, monthOf, pct, round, sum, yuan } from "./util.js";
+import { addMonths, daysBetween, groupBy, monthOf, pct, round, sum, ymd, yuan } from "./util.js";
+import { addDays, evalGoal, goalActual, goalCandidates, lastFullWeek, mondayOf, weekLabel, weekStats, weeklyContext } from "./weekly.js";
 
 // ---------- 状态 ----------
 // datasets: [{id, name, source, fileName, importedAt, count, from, to}]，流水按数据集存 tx:<id>
+// account: 登录后 {email, version(已同步的云端版本), dirty(本机有没同步的改动), syncedAt}；key: 数据密钥（不离开浏览器）
+const blank = () => ({ kinds: {}, statuses: {}, reviews: {}, catOverrides: {}, plan: null, cooling: [], reports: [], chatLog: [], weekly: [], goalChecks: {} });
 const S = {
-  datasets: [], raw: [], txs: [], demo: false,
-  kinds: {}, statuses: {}, reviews: {}, catOverrides: {}, plan: null, cooling: [], reports: [], chatLog: [],
-  settings: { shareMerchants: true, accessCode: "", deviceId: "", consent: false },
-  config: { ai_enabled: false, access_code_required: false },
+  datasets: [], raw: [], txs: [], demo: false, ...blank(),
+  settings: { shareMerchants: true, deviceId: "", consent: false },
+  config: { ai_enabled: false, invite_required: false, email_enabled: false },
+  account: null, key: null, me: null, sync: { state: "", error: "" },
   ov: null, opps: [], ledger: [], lumpy: [], fund: null, saving: 0,
 };
-const PERSIST = ["kinds", "statuses", "reviews", "catOverrides", "plan", "cooling", "reports", "chatLog", "settings"];
-const save = (k) => (S.demo ? Promise.resolve() : store.set(k, S[k]));
+// weekly（每周复盘）以服务器为准，不进云同步的密文；settings 只在本机
+const SYNCED = ["kinds", "statuses", "reviews", "catOverrides", "plan", "cooling", "reports", "chatLog", "goalChecks"];
+const PERSIST = [...SYNCED, "weekly", "settings"];
+async function save(k) {
+  if (S.demo) return;
+  await store.set(k, S[k]);
+  if (SYNCED.includes(k)) markDirty();
+}
 
 const KIND_SLOT = { rigid: 1, fixedFlex: 2, daily: 3, lumpy: 4 };
 const OPP_TYPES = {
@@ -37,19 +47,31 @@ function toast(msg, ms = 2600) {
 
 // ---------- 启动 ----------
 async function boot() {
-  for (const k of PERSIST) S[k] = (await store.get(k)) ?? S[k];
-  if (!S.settings.deviceId) { S.settings.deviceId = crypto.randomUUID?.() || String(Math.random()).slice(2); await save("settings"); }
-  S.datasets = (await store.get("datasets")) || [];
-  S.raw = [];
-  for (const d of S.datasets) S.raw.push(...((await store.get(`tx:${d.id}`)) || []));
+  await loadLocal();
+  S.settings = { ...S.settings, ...((await store.get("settings")) || {}) };
+  if (!S.settings.deviceId) { S.settings.deviceId = crypto.randomUUID?.() || String(Math.random()).slice(2); await store.set("settings", S.settings); }
+  S.account = await store.get("account");
+  S.key = await store.get("dataKey");
   fetch("/api/public-config").then((r) => r.json()).then((c) => {
     S.config = c;
     if (c.model_disclosure) $("#disclosure").textContent = c.model_disclosure;
   }).catch(() => {});
   if (!(await store.persistent())) toast("浏览器不允许本地存储（可能是隐私模式），刷新后数据会丢失", 6000);
+  updateAccountUI();
+  if (S.account) syncAccount();
+  if (location.hash.startsWith("#reset=")) openReset(location.hash.slice(7));
   if (location.hash === "#demo") return enterDemo();
   compute();
   route();
+}
+
+// 从本机存储读出全部数据（不含 settings）
+async function loadLocal() {
+  const b = blank();
+  for (const k of Object.keys(b)) S[k] = (await store.get(k)) ?? b[k];
+  S.datasets = (await store.get("datasets")) || [];
+  S.raw = [];
+  for (const d of S.datasets) S.raw.push(...((await store.get(`tx:${d.id}`)) || []));
 }
 
 function compute() {
@@ -80,7 +102,7 @@ function route() {
   $("#demo-bar").classList.toggle("hidden", !S.demo);
   if (!has) return;
   const tab = (location.hash || "#overview").slice(1);
-  const views = { overview: viewOverview, opps: viewOpps, plan: viewPlan, cooling: viewCooling, coach: viewCoach, data: viewData };
+  const views = { overview: viewOverview, opps: viewOpps, plan: viewPlan, weekly: viewWeekly, cooling: viewCooling, coach: viewCoach, data: viewData };
   const fn = views[tab] || viewOverview;
   $$("#nav a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === `#${views[tab] ? tab : "overview"}`));
   $("#view").innerHTML = fn();
@@ -94,8 +116,7 @@ function rerender() { compute(); route(); }
 function enterDemo() {
   S.demo = true;
   S.raw = demoTransactions().map((t) => ({ ...t, id: hash(`demo|${t.id}`) }));
-  for (const k of ["kinds", "statuses", "reviews", "catOverrides", "cooling", "reports", "chatLog"]) S[k] = Array.isArray(S[k]) ? [] : {};
-  S.plan = null;
+  Object.assign(S, blank());
   S.cooling = [{ id: "c1", item: "儿童平衡车（第二辆）", price: 1299, why: "邻居家孩子有", mood: "焦虑", at: Date.now() - 80 * 3600e3, status: "waiting" },
     { id: "c2", item: "空气炸锅升级款", price: 899, why: "直播间限时价", mood: "冲动", at: Date.now() - 10 * 3600e3, status: "waiting" }];
   compute();
@@ -105,7 +126,7 @@ function enterDemo() {
 
 async function exitDemo() {
   S.demo = false;
-  await exitDemoSilently();
+  await loadLocal();
   location.hash = "";
   rerender();
 }
@@ -392,14 +413,7 @@ bind.viewPlan = () => {
   $("#p-goal-amount").onchange = () => upd((p) => (p.goalAmount = num("#p-goal-amount")));
   $("#p-rate").onchange = () => upd((p) => (p.rate = Math.min(0.2, Math.max(0, num("#p-rate") / 100))));
   $$("[data-cap]").forEach((i) => (i.onchange = () => upd((p) => (p.lumpyCaps[i.dataset.cap] = Number(i.value) || 0))));
-  $("#ics").onclick = () => {
-    const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TrimWise//CN", "BEGIN:VEVENT",
-      `UID:trimwise-monthly-${S.settings.deviceId}`, "DTSTART;TZID=Asia/Shanghai:20261101T200000", "DURATION:PT20M",
-      "RRULE:FREQ=MONTHLY;BYMONTHDAY=1", "SUMMARY:TrimWise 月度节流复盘",
-      `DESCRIPTION:导出上个月的微信/支付宝/随手记账单，拖进 ${location.origin} 看消费卡执行情况，生成月度复盘。`,
-      "BEGIN:VALARM", "TRIGGER:-PT0M", "ACTION:DISPLAY", "DESCRIPTION:月度节流复盘", "END:VALARM", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
-    download("trimwise-月度复盘.ics", ics, "text/calendar");
-  };
+  $("#ics").onclick = () => calendar("MONTHLY;BYMONTHDAY=1", "月度节流复盘", "导出上个月的微信/支付宝/随手记账单拖进来，看消费卡执行情况，生成月度复盘。");
 };
 
 // ---------- 冷静期 ----------
@@ -460,7 +474,7 @@ function viewCoach() {
   const report = S.reports[S.reports.length - 1];
   return `
   ${S.config.ai_enabled ? "" : `<p class="card warn-card">服务器还没有配置 AI，这一页暂时用不了；其他功能都在本地运行，不受影响。</p>`}
-  ${S.config.access_code_required && !S.settings.accessCode ? `<section class="card"><h2>内测访问码</h2><p class="muted">AI 教练在内测中，请输入访问码。</p><div class="form-row"><label>访问码<input id="ac" autocomplete="off"></label><button class="primary" id="ac-save">保存</button></div></section>` : ""}
+  ${S.account ? "" : loginCard("AI 教练需要登录", "内测期间凭邀请码注册。登录后还能每周一收到复盘邮件，多台设备加密同步。")}
   <section class="card">
     <div class="card-head"><h2>月度复盘</h2>
       <span class="actions"><select id="r-month">${months.map((m) => `<option ${m === def ? "selected" : ""}>${m}</option>`).join("")}</select>
@@ -493,6 +507,17 @@ function reportCard(r) {
   </div>`;
 }
 
+function needAccount() {
+  if (S.account) return true;
+  openAccount("login", { why: "AI 功能需要登录" });
+  return false;
+}
+
+function loginCard(title, text) {
+  return `<section class="card login-card"><div><h2>${esc(title)}</h2><p class="muted">${esc(text)}</p></div>
+    <span class="actions"><button class="primary" data-action="register">注册</button><button data-action="login">登录</button></span></section>`;
+}
+
 async function needConsent() {
   if (S.settings.consent) return true;
   const dlg = $("#dlg-consent");
@@ -509,27 +534,26 @@ bind.viewCoach = () => {
   const peek = () => { $("#peek").textContent = JSON.stringify(ai.buildContext(S, { month: $("#r-month").value }), null, 1); };
   $(".peek").ontoggle = peek;
   $("#r-month").onchange = () => $(".peek").open && peek();
-  if ($("#ac-save")) $("#ac-save").onclick = async () => { S.settings.accessCode = $("#ac").value.trim(); await store.set("settings", S.settings); route(); };
   $("#r-go").onclick = async () => {
-    if (!(await needConsent())) return;
+    if (!needAccount() || !(await needConsent())) return;
     aiBusy = true; route();
     try {
       const month = $("#r-month")?.value || S.ov.window.end;
-      const out = await ai.review(ai.buildContext(S, { month }), S.settings);
+      const out = await ai.review(ai.buildContext(S, { month }));
       S.reports.push({ ...out, month, at: Date.now() });
       await save("reports");
     } catch (e) { toast(e.message, 5000); }
     aiBusy = false; route();
   };
   const ask = async (q) => {
-    if (!q || aiBusy || !(await needConsent())) return;
+    if (!q || aiBusy || !needAccount() || !(await needConsent())) return;
     S.chatLog.push({ role: "user", content: q });
     aiBusy = true; route();
     const body = $("#chat-body");
     body.insertAdjacentHTML("beforeend", `<div class="msg assistant pending">思考中…</div>`);
     body.scrollTop = body.scrollHeight;
     try {
-      const { reply } = await ai.chat(ai.buildContext(S), S.chatLog.slice(-10), S.settings);
+      const { reply } = await ai.chat(ai.buildContext(S), S.chatLog.slice(-10));
       S.chatLog.push({ role: "assistant", content: reply });
     } catch (e) { S.chatLog.pop(); toast(e.message, 5000); }
     await save("chatLog");
@@ -553,7 +577,7 @@ function viewData() {
       <thead><tr><th>来源</th><th>文件</th><th class="num">笔数</th><th>时间范围</th><th>导入时间</th><th></th></tr></thead>
       <tbody>${S.datasets.map((d) => `<tr><td>${esc(SOURCES[d.source] || d.source)}</td><td>${esc(d.fileName)}</td><td class="num">${d.count}</td><td class="num">${d.from} ~ ${d.to}</td><td class="muted small">${new Date(d.importedAt).toLocaleString("zh-CN")}</td><td><button class="ghost danger" data-del-ds="${d.id}">删除</button></td></tr>`).join("")}</tbody>
     </table></div>`}
-    <p class="muted small">共 ${S.txs.length} 笔，${S.ov.window.first} ~ ${S.ov.window.last}。所有数据只存在这台设备的浏览器里；换设备请用下面的“导出备份”。</p>
+    <p class="muted small">共 ${S.txs.length} 笔，${S.ov.window.first} ~ ${S.ov.window.last}。${S.account ? "已登录：数据加密后同步到云端，换设备登录即可。" : "所有数据只存在这台设备的浏览器里；换设备请登录（加密同步），或用下面的“导出备份”。"}</p>
   </section>
 
   <section class="card">
@@ -580,18 +604,44 @@ function viewData() {
     </table></div>
   </section>
 
+  ${accountSection()}
+
   <section class="card">
     <h2>设置</h2>
     <label class="check"><input type="checkbox" id="s-merchants" ${S.settings.shareMerchants ? "checked" : ""}> 发给 AI 的汇总里包含商户名称（关掉后建议会更笼统）</label>
     <label class="check"><input type="checkbox" id="s-consent" ${S.settings.consent ? "checked" : ""}> 同意把支出汇总发送给 AI 处理</label>
-    ${S.config.access_code_required ? `<label>AI 内测访问码<input id="s-ac" value="${esc(S.settings.accessCode)}"></label>` : ""}
     <div class="actions">
       <button id="backup" ${S.demo ? "disabled" : ""}>导出备份</button>
       <button id="restore" ${S.demo ? "disabled" : ""}>从备份恢复</button>
       <button id="wipe" class="danger" ${S.demo ? "disabled" : ""}>清空本机所有数据</button>
     </div>
+    <p class="muted small">${S.account ? "清空本机数据不影响云端；下次在这台设备登录会重新同步回来。" : ""}</p>
     <input type="file" id="restore-file" accept=".json" hidden>
   </section>`;
+}
+
+function accountSection() {
+  if (!S.account) return `<section class="card" id="account">
+    <div class="card-head"><h2>账号</h2><span class="actions"><button class="primary" data-action="register">注册</button><button data-action="login">登录</button></span></div>
+    <ul class="muted small benefits">
+      <li>每周一早上 8 点，把上周复盘和这周 3 个目标发到你的邮箱</li>
+      <li>多台设备同步。流水在浏览器里用你的密码加密后再上传，服务器只存密文，解不开</li>
+      <li>不登录也能用全部本地分析</li>
+    </ul></section>`;
+  const sy = S.sync;
+  const status = sy.state === "error" ? `<span class="bad">同步失败：${esc(sy.error)}</span>`
+    : sy.state === "syncing" ? "同步中…"
+    : S.account.syncedAt ? `已同步 · ${new Date(S.account.syncedAt).toLocaleString("zh-CN")}` : "已登录";
+  return `<section class="card" id="account">
+    <div class="card-head"><h2>账号</h2><span class="muted small">${esc(S.account.email)}</span></div>
+    <p class="small">☁️ ${status}${S.me?.vault_size ? `<span class="muted"> · 云端密文 ${(S.me.vault_size / 1048576).toFixed(1)}MB</span>` : ""}</p>
+    <label class="check"><input type="checkbox" id="s-weekly" ${S.me?.weekly_email ? "checked" : ""} ${S.me ? "" : "disabled"}> 每周一早上 8 点发每周复盘邮件${S.config.email_enabled ? "" : "<span class=\"muted small\">（服务器还没配置邮件，暂时只能在「每周复盘」页查看）</span>"}</label>
+    <p class="muted small">开启后，每次数据变化会把最近一周的汇总（和发给 AI 的一样，不含逐笔流水）存到服务器，用于周一自动生成复盘；关掉就删除。</p>
+    <div class="actions">
+      <button id="a-pw">修改密码</button>
+      <button id="a-logout">退出登录</button>
+      <button id="a-delete" class="ghost danger">注销账号</button>
+    </div></section>`;
 }
 
 const detail = { q: "", cat: "", month: "" };
@@ -627,14 +677,15 @@ bind.viewData = () => {
     await store.del(`tx:${d.id}`);
     await store.set("datasets", S.datasets);
     S.raw = S.raw.filter((t) => t.ds !== d.id);
+    markDirty();
     rerender();
   }));
   if ($("#ai-classify")) $("#ai-classify").onclick = async () => {
-    if (!(await needConsent())) return;
+    if (!needAccount() || !(await needConsent())) return;
     const keys = [...new Set(S.txs.filter((t) => t.cat2 === "未分类").map(overrideKey))].slice(0, 600);
     aiBusy = true; route();
     try {
-      const map = await ai.classifyMerchants(keys, S.settings);
+      const map = await ai.classifyMerchants(keys);
       Object.assign(S.catOverrides, map);
       await save("catOverrides");
       toast(`归类了 ${Object.keys(map).length} 个商户`);
@@ -643,34 +694,414 @@ bind.viewData = () => {
   };
   $("#s-merchants").onchange = async (e) => { S.settings.shareMerchants = e.target.checked; await store.set("settings", S.settings); };
   $("#s-consent").onchange = async (e) => { S.settings.consent = e.target.checked; await store.set("settings", S.settings); };
-  if ($("#s-ac")) $("#s-ac").onchange = async (e) => { S.settings.accessCode = e.target.value.trim(); await store.set("settings", S.settings); };
+  if ($("#s-weekly")) $("#s-weekly").onchange = async (e) => {
+    const on = e.target.checked;
+    if (on && !(await needConsent())) { e.target.checked = false; return; }
+    try {
+      await acct.api("PUT", "/api/settings", { weekly_email: on });
+      S.me.weekly_email = on;
+      if (on) pushSnapshot();
+      toast(on ? "开启了：每周一早上 8 点发复盘邮件" : "关掉了，服务器上的每周汇总已删除");
+    } catch (err) { e.target.checked = !on; toast(err.message, 5000); }
+  };
+  if ($("#a-pw")) $("#a-pw").onclick = () => openAccount("change");
+  if ($("#a-logout")) $("#a-logout").onclick = logout;
+  if ($("#a-delete")) $("#a-delete").onclick = deleteAccount;
   $("#backup").onclick = async () => {
-    const data = { app: "trimwise", version: 1, exportedAt: new Date().toISOString(), datasets: S.datasets, tx: {} };
-    for (const d of S.datasets) data.tx[d.id] = await store.get(`tx:${d.id}`);
-    for (const k of PERSIST) if (k !== "settings") data[k] = S[k];
-    download(`trimwise-备份-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data));
+    download(`trimwise-备份-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await bundle()));
   };
   $("#restore").onclick = () => $("#restore-file").click();
   $("#restore-file").onchange = async (e) => {
     try {
       const data = JSON.parse(await e.target.files[0].text());
       if (data.app !== "trimwise") throw new Error("不是 TrimWise 的备份文件");
-      if (!confirm("恢复会覆盖本机现有的数据，继续？")) return;
-      await store.clearAll();
-      for (const d of data.datasets) await store.set(`tx:${d.id}`, data.tx[d.id] || []);
-      await store.set("datasets", data.datasets);
-      for (const k of PERSIST) if (k !== "settings" && data[k] !== undefined) await store.set(k, data[k]);
-      await store.set("settings", S.settings);
+      if (!confirm(S.account ? "恢复会覆盖本机和云端现有的数据，继续？" : "恢复会覆盖本机现有的数据，继续？")) return;
+      await applyBundle(data);
+      if (S.account) {
+        // 以备份为准覆盖云端：把基准版本对齐到云端最新，避免被当成冲突去合并
+        S.me = await acct.api("GET", "/api/me");
+        S.account.version = S.me.vault_version;
+        await pushVault();
+      }
       location.reload();
     } catch (err) { toast(err.message, 5000); }
   };
   $("#wipe").onclick = async () => {
-    if (!confirm("清空这台设备上的所有流水、计划和复盘？清空前建议先导出备份。")) return;
+    if (!confirm(S.account ? "清空这台设备上的数据并退出登录？云端的加密数据不受影响。" : "清空这台设备上的所有流水、计划和复盘？清空前建议先导出备份。")) return;
+    if (S.account) await acct.api("POST", "/api/logout").catch(() => {});
     await store.clearAll();
     location.hash = "";
     location.reload();
   };
 };
+
+// ---------- 每周复盘 ----------
+// 复盘“最近一个完整周”（week），定下“本周”（week + 7）的 3 个目标；下周复盘时自动判定完成了没有
+function viewWeekly() {
+  const last = S.ov.window.last;
+  const week = lastFullWeek(last), next = addDays(week, 7);
+  const stats = weekStats(S.txs, S.kinds, S.plan, week);
+  const rep = S.weekly.find((r) => r.week === week);
+  const prev = S.weekly.find((r) => r.week === addDays(week, -7));
+  const lag = daysBetween(last, ymd(new Date()));
+  const diff = stats.avg ? (stats.total - stats.avg) / stats.avg : null;
+  const prevGoals = (prev?.goals || []).map((g) => ({ g, e: evalGoal(g, S.txs, S.kinds, week, S.goalChecks, last) }));
+  const cands = goalCandidates(S, stats);
+  return `
+  ${S.account ? "" : loginCard("每周一早上，把复盘发到你的邮箱", "登录后：每周一 8 点收到上周复盘和这周 3 个目标，下周自动判定完成了没有。内测期间凭邀请码注册。")}
+  ${lag > 8 ? `<section class="card warn-card"><b>最新的数据到 ${last}（${lag} 天前）。</b> 导入最近的账单，才能复盘上周。
+    <span class="muted small">微信：我 → 服务 → 钱包 → 账单 → 常见问题 → 下载账单，时间选“上周”；收到的 zip 直接拖进来。</span>
+    ${S.demo ? "" : `<button class="primary" data-action="import">导入账单</button>`}</section>` : ""}
+
+  <section class="card">
+    <div class="card-head"><h2>这周的 3 个目标 <span class="muted small">${weekLabel(next)}</span></h2>${rep ? `<span class="muted small">${last >= next ? `按截至 ${last.slice(5)} 的数据` : "导入这周的账单后自动判定"}</span>` : ""}</div>
+    ${rep ? `<div class="wgoals">${rep.goals.map((g) => goalRow(g, next, last)).join("")}</div>`
+      : `<p class="muted">生成上周的复盘后，教练会从下面 ${cands.length} 个候选里挑 3 个最值得做的，作为这周的目标。每个目标都能用流水自动判定完成了没有。</p>
+         <details><summary class="small">看看候选目标</summary><ul class="small">${cands.map((c) => `<li>${esc(c.text)} <span class="muted">${esc(c.basis || "")}</span></li>`).join("")}</ul></details>`}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>上周复盘 <span class="muted small">${weekLabel(week)}</span></h2>
+      <span class="actions"><button class="${rep ? "" : "primary"}" id="w-go" ${aiBusy || S.demo && !S.account ? "disabled" : ""}>${aiBusy ? "生成中…" : rep ? "重新生成" : "生成复盘"}</button></span></div>
+    <section class="kpis compact">
+      ${tile("上周支出", yuan(stats.total), stats.avg === null ? `${stats.count} 笔` : `前 ${stats.weeks} 周平均 ${yuan(stats.avg)}（${diff >= 0 ? "+" : ""}${pct(diff)}）`, diff > 0.15 ? "up" : diff < -0.1 ? "good" : "")}
+      ${tile("消费卡", `${yuan(stats.daily)} / ${yuan(stats.quota)}`, stats.daily > stats.quota ? `超了 ${yuan(stats.daily - stats.quota)}` : `剩 ${yuan(stats.quota - stats.daily)}`, stats.daily > stats.quota ? "up" : "good")}
+      ${tile("上周的目标", prevGoals.length ? `${prevGoals.filter((x) => x.e.done).length} / ${prevGoals.length}` : "—", prevGoals.length ? "达成" : "还没有定过目标")}
+    </section>
+    ${prevGoals.length ? `<div class="wgoals">${prevGoals.map(({ g, e }) => `<div class="wgoal ${e.done ? "done" : "miss"}"><span class="mark">${e.done ? "✓" : "✗"}</span><div>${esc(g.text)}${e.actual !== null ? ` <span class="muted small">实际 ${goalActual(g, e)}</span>` : ""}</div></div>`).join("")}</div>` : ""}
+    ${barChart(stats.trend.map((x, i) => ({ label: weekLabel(x.week).split("–")[0], value: x.total, muted: i < stats.trend.length - 1, tip: `${weekLabel(x.week)}：${yuan(x.total)}` })), { fmt: yuan, label: "每周支出", width: chartWidth() })}
+    <details class="peek"><summary>查看将发送给 AI 的内容</summary><pre id="w-peek"></pre></details>
+    ${rep ? weeklyCard(rep) : `<p class="muted">教练会看上周花在哪、和前几周比怎么样、上周的目标完成了没有，然后定这周的 3 个目标。${S.me?.weekly_email ? "每周一早上 8 点也会自动生成并发到你的邮箱。" : ""}</p>`}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>上周花在哪</h2><span class="muted small">和前 ${stats.weeks || "几"} 周平均比</span></div>
+    <div class="tbl"><table>
+      <thead><tr><th>分类</th><th class="num">上周</th><th class="num">次数</th><th class="num">每周平均</th><th class="num">差</th></tr></thead>
+      <tbody>${stats.byCat.filter((c) => c.week > 0 || c.kind === "daily").slice(0, 12).map((c) => { const d = c.week - c.avg; return `<tr><td>${esc(c.cat2)} <span class="tag">${KINDS[c.kind].name}</span></td><td class="num">${yuan(c.week)}</td><td class="num">${c.count}</td><td class="num muted">${yuan(c.avg)}</td><td class="num ${d > 200 && d > c.avg * 0.3 ? "bad" : d < -100 ? "good-text" : ""}">${yuan(d, { sign: true })}</td></tr>`; }).join("")}</tbody>
+    </table></div>
+    ${stats.big.length ? `<p class="small">大额：${stats.big.map((t) => `${t.date.slice(5)} ${esc(t.cat2)} <b>${yuan(t.amount)}</b>`).join("，")}</p>` : ""}
+  </section>
+
+  ${S.weekly.filter((r) => r.week !== week).length ? `<section class="card"><details><summary>以前的每周复盘（${S.weekly.filter((r) => r.week !== week).length}）</summary>
+    ${S.weekly.filter((r) => r.week !== week).slice().reverse().map((r) => `<div class="muted small" style="margin-top:14px">${weekLabel(r.week)}</div>${weeklyCard(r)}`).join("")}</details></section>` : ""}
+
+  ${S.me?.weekly_email ? "" : `<p class="muted small center">不用邮件的话，也可以 <a href="#" id="w-ics">把“每周一 20:00 复盘”加到日历</a>。</p>`}`;
+}
+
+function goalRow(g, week, last) {
+  if (g.type === "manual") {
+    const k = `${week}|${g.id}`;
+    return `<label class="wgoal check ${S.goalChecks[k] ? "done" : ""}"><input type="checkbox" data-goal="${esc(k)}" ${S.goalChecks[k] ? "checked" : ""} ${S.demo ? "disabled" : ""}><div>${esc(g.text)}${g.why ? `<div class="muted small">${esc(g.why)}</div>` : ""}</div></label>`;
+  }
+  const started = last >= week;
+  const e = evalGoal(g, S.txs, S.kinds, week, S.goalChecks, last);
+  const ratio = g.limit > 0 ? e.actual / g.limit : e.actual > 0 ? 2 : 0;
+  return `<div class="wgoal ${started && !e.done ? "miss" : ""}"><span class="mark">${!started ? "○" : e.done ? (e.final ? "✓" : "…") : "✗"}</span><div class="grow">
+    <div>${esc(g.text)}</div>
+    ${started ? `<div class="bar"><i class="${e.done ? "" : "warn"}" style="width:${Math.min(100, ratio * 100)}%"></i></div><div class="small muted">已经 ${goalActual(g, e)} / ${g.metric === "count" ? `${g.limit} 次` : yuan(g.limit)}</div>` : ""}
+    ${g.why ? `<div class="muted small">${esc(g.why)}</div>` : ""}</div></div>`;
+}
+
+function weeklyCard(r) {
+  return `<div class="report">
+    <h3>${esc(r.headline)}</h3>
+    <div class="two-col">
+      ${r.wins?.length ? `<div><h4>👍 做得好</h4><ul>${r.wins.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      ${r.watch?.length ? `<div><h4>👀 要注意</h4><ul>${r.watch.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    </div>
+    <h4>这周的目标</h4><ol>${(r.goals || []).map((g) => `<li><b>${esc(g.text)}</b>${g.why ? `<div class="muted small">${esc(g.why)}</div>` : ""}</li>`).join("")}</ol>
+    ${r.tip ? `<p class="question">💡 ${esc(r.tip)}</p>` : ""}
+  </div>`;
+}
+
+bind.viewWeekly = () => {
+  const week = lastFullWeek(S.ov.window.last);
+  $("#w-peek").closest("details").ontoggle = () => { $("#w-peek").textContent = JSON.stringify(weeklyContext(S, week), null, 1); };
+  $("#w-go").onclick = async () => {
+    if (!needAccount() || !(await needConsent())) return;
+    aiBusy = true; route();
+    try {
+      const rep = await ai.weeklyReview(weeklyContext(S, week));
+      S.weekly = S.weekly.filter((r) => r.week !== week).concat(rep).sort((a, b) => (a.week < b.week ? -1 : 1));
+      await store.set("weekly", S.weekly);
+    } catch (e) { toast(e.message, 5000); }
+    aiBusy = false; route();
+  };
+  $$("[data-goal]").forEach((c) => (c.onchange = async () => {
+    if (c.checked) S.goalChecks[c.dataset.goal] = true; else delete S.goalChecks[c.dataset.goal];
+    await save("goalChecks");
+    route();
+  }));
+  if ($("#w-ics")) $("#w-ics").onclick = (e) => { e.preventDefault(); calendar("WEEKLY;BYDAY=MO", "每周节流复盘", "导出上周的微信/支付宝账单拖进来，生成每周复盘，定这周的 3 个目标。"); };
+};
+
+// 日历提醒（.ics）：rule 是 RRULE 的 FREQ 部分
+function calendar(rule, title, desc) {
+  const first = rule.startsWith("WEEKLY") ? addDays(mondayOf(ymd(new Date())), 7) : `${addMonths(ymd(new Date()).slice(0, 7), 1)}-01`;
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TrimWise//CN", "BEGIN:VEVENT",
+    `UID:trimwise-${rule.slice(0, 6).toLowerCase()}-${S.settings.deviceId}`, `DTSTART;TZID=Asia/Shanghai:${first.replaceAll("-", "")}T200000`, "DURATION:PT20M",
+    `RRULE:FREQ=${rule}`, `SUMMARY:TrimWise ${title}`, `DESCRIPTION:${desc} ${location.origin}`,
+    "BEGIN:VALARM", "TRIGGER:-PT0M", "ACTION:DISPLAY", `DESCRIPTION:${title}`, "END:VALARM", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+  download(`trimwise-${title}.ics`, ics, "text/calendar");
+}
+
+// ---------- 账号与同步 ----------
+const hasLocalData = () => S.datasets.length > 0;
+
+async function bundle() {
+  const data = { app: "trimwise", version: 1, exportedAt: new Date().toISOString(), datasets: S.datasets, tx: {} };
+  for (const d of S.datasets) data.tx[d.id] = (await store.get(`tx:${d.id}`)) || [];
+  for (const k of SYNCED) data[k] = S[k];
+  return data;
+}
+
+// 用一份完整数据替换本机数据（云端下载、从备份恢复）
+async function applyBundle(b) {
+  for (const k of await store.keys()) if (String(k).startsWith("tx:")) await store.del(k);
+  for (const d of b.datasets || []) await store.set(`tx:${d.id}`, b.tx?.[d.id] || []);
+  await store.set("datasets", b.datasets || []);
+  const def = blank();
+  for (const k of SYNCED) await store.set(k, b[k] ?? def[k]);
+  await loadLocal();
+}
+
+function setSync(state, error = "") {
+  S.sync = { state, error };
+  updateAccountUI();
+  if (location.hash === "#data" && $("#account")) $("#account").outerHTML = accountSection(), bind.viewData();
+}
+
+function updateAccountUI() {
+  const b = $("#btn-account");
+  b.textContent = S.account ? `${S.sync.state === "error" ? "⚠ " : S.sync.state === "syncing" ? "☁️ " : ""}${S.account.email.split("@")[0]}` : "登录";
+  b.title = S.account ? `${S.account.email}${S.sync.error ? ` · 同步失败：${S.sync.error}` : ""}` : "登录后每周收到复盘邮件，多设备加密同步";
+}
+
+let syncTimer;
+function markDirty() {
+  if (!S.account || S.demo) return;
+  S.account.dirty = true;
+  store.set("account", S.account);
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(pushVault, 1500);
+}
+
+let syncBusy = false, syncAgain = false;
+async function pushVault() {
+  if (!S.account || !S.key || S.demo) return;
+  if (syncBusy) { syncAgain = true; return; }
+  syncBusy = true;
+  setSync("syncing");
+  try {
+    for (let i = 0; ; i++) {
+      try {
+        const sealed = await acct.seal(await bundle(), S.key);
+        const { version } = await acct.api("PUT", "/api/vault", { base_version: S.account.version, ...sealed });
+        Object.assign(S.account, { version, dirty: false, syncedAt: Date.now() });
+        await store.set("account", S.account);
+        break;
+      } catch (e) {
+        if (e.status !== 409 || i >= 2) throw e;
+        await pullVault(true); // 别的设备先改过：合并后再传
+      }
+    }
+    setSync("ok");
+    pushSnapshot();
+  } catch (e) {
+    if (e.status === 401) sessionLost(); else setSync("error", e.message);
+  }
+  syncBusy = false;
+  if (syncAgain) { syncAgain = false; pushVault(); }
+}
+
+// 下载云端数据；merge=true 时和本机数据合并（本机优先），否则直接用云端的
+async function pullVault(merge) {
+  const v = await acct.api("GET", "/api/vault");
+  if (!v.version) return false;
+  const cloud = await acct.unseal(v, S.key);
+  await applyBundle(merge ? acct.mergeBundles(await bundle(), cloud) : cloud);
+  S.account.version = v.version;
+  if (merge) S.account.dirty = true;
+  await store.set("account", S.account);
+  if (!S.demo) rerender();
+  return true;
+}
+
+// 打开页面时：云端比本机新就拉下来，本机有没传的改动就推上去
+async function syncAccount() {
+  try {
+    S.me = await acct.api("GET", "/api/me");
+  } catch (e) {
+    if (e.status === 401) sessionLost(); else setSync("error", "连不上服务器");
+    return;
+  }
+  if (!S.key) return sessionLost();
+  try {
+    if (S.me.vault_version > S.account.version) await pullVault(S.account.dirty);
+    else if (S.me.vault_version < S.account.version) { S.account.version = S.me.vault_version; S.account.dirty = hasLocalData(); } // 云端被清过（重设密码）
+    if (S.account.dirty) await pushVault(); else { setSync("ok"); pushSnapshot(); }
+  } catch (e) { setSync("error", e.message); }
+  await loadWeekly();
+}
+
+async function loadWeekly() {
+  try {
+    const { reports } = await acct.api("GET", "/api/weekly");
+    S.weekly = reports.sort((a, b) => (a.week < b.week ? -1 : 1));
+    await store.set("weekly", S.weekly);
+    if (location.hash === "#weekly" && !S.demo) route();
+  } catch { /* 离线时用本机缓存 */ }
+}
+
+// 每周汇总快照：周一的定时任务用它生成复盘（只在开了每周邮件、同意过发送汇总时上传）
+function pushSnapshot() {
+  if (!S.me?.weekly_email || !S.settings.consent || S.demo || !S.ov) return;
+  acct.api("PUT", "/api/weekly/snapshot", { context: weeklyContext(S, lastFullWeek(S.ov.window.last)) }).catch(() => {});
+}
+
+async function sessionLost() {
+  S.account = S.key = S.me = null;
+  await store.del("account");
+  await store.del("dataKey");
+  setSync("");
+  toast("登录已失效，请重新登录（本机数据还在）", 5000);
+}
+
+async function startSession(email, key) {
+  if (S.demo) { S.demo = false; await loadLocal(); }
+  S.key = key;
+  S.account = { email: email.trim().toLowerCase(), version: 0, dirty: hasLocalData(), syncedAt: 0 };
+  await store.set("dataKey", key);
+  await store.set("account", S.account);
+  S.me = await acct.api("GET", "/api/me");
+  // 云端已有数据：本机没数据就直接用云端的，有就合并
+  if (S.me.vault_version) await pullVault(hasLocalData());
+  if (S.account.dirty) await pushVault(); else setSync("ok");
+  await loadWeekly();
+  rerender();
+}
+
+async function logout() {
+  const wipe = confirm("退出登录后，要同时清除这台设备上的数据吗？\n\n确定：清除（公用电脑建议这样做；云端有加密备份，下次登录会同步回来）\n取消：保留在这台设备上");
+  if (S.account?.dirty) await pushVault();
+  await acct.api("POST", "/api/logout").catch(() => {});
+  await store.del("account");
+  await store.del("dataKey");
+  if (wipe) { await store.clearAll(); location.hash = ""; location.reload(); return; }
+  S.account = S.key = S.me = null;
+  S.weekly = [];
+  await store.set("weekly", []);
+  setSync("");
+  route();
+}
+
+async function deleteAccount() {
+  if (prompt(`注销账号会删除云端的加密数据、每周复盘和账号本身，不能恢复。本机数据会保留。\n\n确认的话，输入你的邮箱：`)?.trim().toLowerCase() !== S.account.email) return;
+  try {
+    await acct.api("DELETE", "/api/account");
+  } catch (e) { return toast(e.message, 5000); }
+  await store.del("account");
+  await store.del("dataKey");
+  S.account = S.key = S.me = null;
+  S.weekly = [];
+  await store.set("weekly", []);
+  setSync("");
+  toast("账号已注销，云端数据已删除");
+  route();
+}
+
+// 登录 / 注册 / 忘记密码 / 重设密码 / 修改密码 共用一个对话框
+const ACCOUNT_MODES = {
+  login: { title: "登录", ok: "登录", fields: ["email", "pw"] },
+  register: { title: "注册", ok: "注册", fields: ["email", "pw", "pw2", "invite"] },
+  forgot: { title: "忘记密码", ok: "发送重设链接", fields: ["email"] },
+  reset: { title: "重设密码", ok: "重设并登录", fields: ["email", "pw", "pw2"] },
+  change: { title: "修改密码", ok: "修改", fields: ["old", "pw", "pw2"] },
+};
+let accountCtx = {};
+
+function openAccount(mode, ctx = {}) {
+  accountCtx = { ...ctx, mode };
+  const m = ACCOUNT_MODES[mode];
+  const dlg = $("#dlg-account");
+  $("#acc-title").textContent = m.title;
+  $("#acc-ok").textContent = m.ok;
+  for (const f of ["email", "old", "pw", "pw2", "invite"]) $(`#acc-row-${f}`).classList.toggle("hidden", !m.fields.includes(f) || (f === "invite" && !S.config.invite_required));
+  $("#acc-pw-label").textContent = mode === "login" ? "密码" : mode === "change" || mode === "reset" ? "新密码" : "密码（至少 8 位）";
+  $("#acc-pw").autocomplete = mode === "login" ? "current-password" : "new-password";
+  $("#acc-email").readOnly = mode === "reset";
+  $("#acc-email").value = ctx.email || $("#acc-email").value || "";
+  for (const f of ["old", "pw", "pw2"]) $(`#acc-${f}`).value = "";
+  $("#acc-error").textContent = "";
+  $("#acc-sub").innerHTML = {
+    login: ctx.why ? `${esc(ctx.why)}。还没有账号？<a href="#" data-mode="register">注册</a>` : `还没有账号？<a href="#" data-mode="register">注册</a>`,
+    register: `已有账号？<a href="#" data-mode="login">登录</a>`,
+    forgot: "我们会把重设链接发到这个邮箱。",
+    reset: "设置一个新密码。",
+    change: "",
+  }[mode];
+  $("#acc-note").innerHTML = {
+    login: `<a href="#" data-mode="forgot">忘记密码？</a>`,
+    register: "密码在你的浏览器里用来加密数据，我们看不到，也帮不了你找回。忘了可以重设，但云端的加密数据会清空（本机的数据不受影响，登录后会重新上传）。",
+    forgot: "",
+    reset: "云端的加密数据是用旧密码加密的，重设后会清空。在存有数据的设备上登录一次，就会用新密码重新同步。",
+    change: "会用新密码重新加密云端的数据，其他设备需要重新登录。",
+  }[mode];
+  if (!dlg.open) dlg.showModal();
+}
+
+async function openReset(token) {
+  history.replaceState(null, "", location.pathname);
+  try {
+    const { email } = await acct.api("GET", `/api/password/reset/${encodeURIComponent(token)}`);
+    openAccount("reset", { email, token });
+  } catch (e) { toast(e.message, 5000); }
+}
+
+async function submitAccount(e) {
+  e.preventDefault();
+  const { mode } = accountCtx;
+  const email = $("#acc-email").value.trim().toLowerCase(), pw = $("#acc-pw").value;
+  const err = (msg) => { $("#acc-error").textContent = msg; };
+  if (mode !== "change" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err("邮箱格式不对");
+  if (["register", "reset", "change"].includes(mode)) {
+    if (pw.length < 8) return err("密码至少 8 位");
+    if (pw !== $("#acc-pw2").value) return err("两次输入的密码不一样");
+  }
+  const btn = $("#acc-ok");
+  btn.disabled = true;
+  err("");
+  try {
+    if (mode === "forgot") {
+      await acct.api("POST", "/api/password/forgot", { email });
+      $("#dlg-account").close();
+      toast("如果这个邮箱注册过，重设链接已经发过去了（1 小时内有效）", 6000);
+    } else if (mode === "change") {
+      const old = await acct.deriveKeys(S.account.email, $("#acc-old").value);
+      const nu = await acct.deriveKeys(S.account.email, pw);
+      if (S.me && S.me.vault_version > S.account.version) await pullVault(S.account.dirty);
+      const vault = await acct.seal(await bundle(), nu.key);
+      const { version } = await acct.api("POST", "/api/password/change", { old_auth: old.auth, new_auth: nu.auth, vault });
+      S.key = nu.key;
+      Object.assign(S.account, { version, dirty: false, syncedAt: Date.now() });
+      await store.set("dataKey", nu.key);
+      await store.set("account", S.account);
+      $("#dlg-account").close();
+      toast("密码改好了，云端数据已用新密码重新加密");
+    } else {
+      btn.textContent = "加密计算中…";
+      const { auth, key } = await acct.deriveKeys(email, pw);
+      if (mode === "reset") await acct.api("POST", "/api/password/reset", { token: accountCtx.token, auth });
+      else await acct.api("POST", `/api/${mode}`, { email, auth, invite_code: $("#acc-invite").value.trim() });
+      $("#dlg-account").close();
+      await startSession(email, key);
+      toast(mode === "register" ? "注册好了。去「每周复盘」看看上周吧" : "已登录，数据已同步");
+    }
+  } catch (ex) { err(ex.message); }
+  btn.disabled = false;
+  btn.textContent = ACCOUNT_MODES[mode].ok;
+}
 
 // ---------- 导入 ----------
 let pending = [];
@@ -730,7 +1161,7 @@ async function handleFiles(files) {
 }
 
 async function confirmImport() {
-  if (S.demo) { S.demo = false; await exitDemoSilently(); }
+  if (S.demo) { S.demo = false; await loadLocal(); }
   const existingIds = new Set(S.raw.map((t) => t.id));
   let added = 0;
   for (const r of pending) {
@@ -746,18 +1177,13 @@ async function confirmImport() {
     added += fresh.length;
   }
   await store.set("datasets", S.datasets);
+  if (added) markDirty();
   $("#dlg-import").close();
   pending = [];
   compute();
   toast(added ? `导入了 ${added} 笔新记录` : "没有新记录（都已经导入过了）");
   location.hash = "#overview";
   route();
-}
-
-async function exitDemoSilently() {
-  for (const k of PERSIST) S[k] = (await store.get(k)) ?? (Array.isArray(S[k]) ? [] : k === "plan" ? null : k === "settings" ? S.settings : {});
-  S.raw = [];
-  for (const d of S.datasets) S.raw.push(...((await store.get(`tx:${d.id}`)) || []));
 }
 
 // ---------- 全局事件 ----------
@@ -768,11 +1194,16 @@ document.addEventListener("click", (e) => {
     if (a.dataset.action === "import") openImport();
     if (a.dataset.action === "demo") enterDemo();
     if (a.dataset.action === "exit-demo") exitDemo();
+    if (a.dataset.action === "login" || a.dataset.action === "register") openAccount(a.dataset.action);
   }
+  const m = e.target.closest("#dlg-account [data-mode]");
+  if (m) { e.preventDefault(); openAccount(m.dataset.mode, { email: $("#acc-email").value }); }
   const c = e.target.closest("dialog [data-close]");
   if (c) c.closest("dialog").close();
 });
 $("#btn-import").onclick = openImport;
+$("#btn-account").onclick = () => { if (!S.account) return openAccount("login"); location.hash = "#data"; setTimeout(() => $("#account")?.scrollIntoView({ behavior: "smooth" }), 50); };
+$("#acc-form").onsubmit = submitAccount;
 $("#pick").onclick = (e) => { e.preventDefault(); $("#file-input").click(); };
 $("#file-input").onchange = (e) => { handleFiles(e.target.files); e.target.value = ""; };
 $("#import-confirm").onclick = confirmImport;

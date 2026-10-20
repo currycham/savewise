@@ -1,5 +1,6 @@
 // 发给 AI 的只有汇总：按月、按分类的金额，可砍清单和计划。不发逐笔流水、账户、订单号。
 // 用户可以在页面上看到将要发送的完整内容。
+import { api } from "./account.js";
 import { TAXONOMY } from "./categorize.js";
 import { isSpend, spend } from "./analyze.js";
 import { addMonths, groupBy, monthOf, monthRange, round, sum } from "./util.js";
@@ -57,26 +58,19 @@ export function buildContext(S, { month } = {}) {
   return ctx;
 }
 
-async function post(path, body, settings) {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Device": settings.deviceId, "X-Access-Code": settings.accessCode || "" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `请求失败（${res.status}）`);
-  return data;
-}
+// AI 接口需要登录（内测期间凭邀请码注册），按用户限次
+const post = (path, body) => api("POST", path, body);
 
-export const review = (context, settings) => post("/api/ai/review", { context }, settings);
-export const chat = (context, messages, settings) => post("/api/ai/chat", { context, messages }, settings);
+export const review = (context) => post("/api/ai/review", { context });
+export const chat = (context, messages) => post("/api/ai/chat", { context, messages });
+export const weeklyReview = (context) => post("/api/weekly/review", { context });
 
 // 未分类的商户交给 AI 归类：只发“交易对方 + 商品说明”文本，不发金额
-export async function classifyMerchants(texts, settings) {
+export async function classifyMerchants(texts) {
   const out = {};
   for (let i = 0; i < texts.length; i += 120) {
     const batch = texts.slice(i, i + 120);
-    const { items } = await post("/api/ai/classify", { items: batch, taxonomy: TAXONOMY }, settings);
+    const { items } = await post("/api/ai/classify", { items: batch, taxonomy: TAXONOMY });
     for (const it of items) out[batch[it.i]] = [it.cat1, it.cat2];
   }
   return out;

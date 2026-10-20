@@ -21,8 +21,8 @@ class BudgetError(LLMError):
 
 
 def chat(messages: list[dict], *, json_mode: bool = False, temperature: float = 0.3,
-         max_tokens: int = 4000, timeout: float = 120, task: str = "other", device: str = "") -> str:
-    """task / device 只用于记账和限流：按环节统计成本，按设备限制每天的次数。"""
+         max_tokens: int = 4000, timeout: float = 120, task: str = "other", actor: str = "") -> str:
+    """task / actor 只用于记账和限流：按环节统计成本，按用户限制每天的次数。"""
     if not DEEPSEEK_API_KEY:
         raise LLMError("未配置 DEEPSEEK_API_KEY")
     try:
@@ -48,17 +48,17 @@ def chat(messages: list[dict], *, json_mode: bool = False, temperature: float = 
     except httpx.HTTPError as e:
         raise LLMError(f"DeepSeek 请求失败: {e}") from e
     data = resp.json()
-    _record_usage(task, device, data.get("usage") or {})
+    _record_usage(task, actor, data.get("usage") or {})
     return data["choices"][0]["message"]["content"] or ""
 
 
-def _record_usage(task: str, device: str, usage: dict) -> None:
+def _record_usage(task: str, actor: str, usage: dict) -> None:
     prompt = usage.get("prompt_tokens") or 0
     cached = usage.get("prompt_cache_hit_tokens") or 0
     completion = usage.get("completion_tokens") or 0
     cost = ((prompt - cached) * DEEPSEEK_PRICE_INPUT + cached * DEEPSEEK_PRICE_CACHED
             + completion * DEEPSEEK_PRICE_OUTPUT) / 1e6
-    costs.record(task, device, cost, prompt, cached, completion)
+    costs.record(task, actor, cost, prompt, cached, completion)
 
 
 def chat_json(messages: list[dict], **kwargs) -> dict:

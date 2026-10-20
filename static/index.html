@@ -19,11 +19,13 @@
     <a href="#overview">体检</a>
     <a href="#opps">可砍清单</a>
     <a href="#plan">节流计划</a>
+    <a href="#weekly">每周复盘</a>
     <a href="#cooling">冷静期</a>
     <a href="#coach">AI 教练</a>
     <a href="#data">数据</a>
   </nav>
   <button id="btn-import" class="primary small-btn hidden">导入账单</button>
+  <button id="btn-account" class="small-btn">登录</button>
 </header>
 
 <div id="demo-bar" class="demo-bar hidden">
@@ -35,18 +37,19 @@
   <div class="hero">
     <h1>别再凭感觉砍，<br>让你的流水告诉你钱漏在哪。</h1>
     <p class="lead">TrimWise 不是又一个记账 App。把随手记、微信、支付宝的账单导进来，它会找出<b>无感的小额高频</b>、<b>还在扣钱的订阅</b>、<b>深夜冲动的大额消费</b>和<b>悄悄膨胀的分类</b>，算出每一项一年能省多少，再陪你把它变成每月一张消费卡。</p>
-    <div class="loop"><span>导入流水</span><i>→</i><span>支出体检</span><i>→</i><span>可砍清单</span><i>→</i><span>每月消费卡</span><i>→</i><span>自由基金</span></div>
+    <div class="loop"><span>导入流水</span><i>→</i><span>支出体检</span><i>→</i><span>可砍清单</span><i>→</i><span>每周 3 个目标</span><i>→</i><span>自由基金</span></div>
     <div class="cta">
       <button class="primary big" data-action="import">导入我的账单</button>
       <button class="big" data-action="demo">先看演示数据</button>
     </div>
-    <p class="muted small">🔒 流水只在你的浏览器里解析和保存，不上传服务器。AI 教练只收到按月、按分类的汇总，发送前你可以看到完整内容。</p>
+    <p class="muted small">🔒 流水在你的浏览器里解析。不登录，数据只存在这台设备；登录后，流水先在浏览器里用你的密码加密再同步，服务器只存密文、解不开。AI 教练只收到按周、按月、按分类的汇总，发送前你可以看到完整内容。</p>
   </div>
 
   <div class="principles">
     <div class="card"><h3>不砍生活品质</h3><p>房租、阿姨、孩子必需品、保险是高品质生活的基石，不建议砍，只优化单价。</p></div>
     <div class="card"><h3>只砍“无意识”的部分</h3><p>单笔不心疼的外卖打车、忘了取消的会员、焦虑时下的单，是降支出最不痛的地方。</p></div>
     <div class="card"><h3>数字由代码算，AI 只负责说人话</h3><p>每一项可省金额都是确定性规则算出来的，可以追溯到具体交易；AI 不编数字。</p></div>
+    <div class="card"><h3>每周一封复盘</h3><p>每周一早上，把上周花在哪、上周的目标完成了没有、这周做哪 3 件事发到你的邮箱。目标都能用流水自动判定。</p></div>
   </div>
 
   <h2 class="section-title">怎么导出账单</h2>
@@ -80,7 +83,7 @@
 <main id="app" class="hidden"><div id="view"></div></main>
 
 <footer class="footer">
-  <p>数据只保存在这台设备的浏览器里 · <span id="disclosure">AI 功能由 DeepSeek 大模型提供</span> · 本工具只做支出分析与习惯辅助，不提供投资建议</p>
+  <p>流水在浏览器里解析；登录后加密同步，服务器解不开 · <span id="disclosure">AI 功能由 DeepSeek 大模型提供</span> · 本工具只做支出分析与习惯辅助，不提供投资建议</p>
 </footer>
 
 <input type="file" id="file-input" multiple accept=".csv,.xlsx,.xls,.zip,.txt" hidden>
@@ -112,11 +115,27 @@
   <ul class="consent">
     <li>AI 教练会把你的<b>支出汇总</b>发送给服务器，再由服务器转给大模型（DeepSeek）生成复盘和回答。</li>
     <li>发送的是按月、按分类的金额、可砍清单和计划；<b>不发送逐笔流水、账户、订单号</b>。是否附带商户名称可以在「数据 → 设置」里关闭。</li>
-    <li>服务器不保存你发送的内容，只记录调用次数和成本，用于限流。</li>
+    <li>服务器不保存月度复盘和提问发送的内容，只记录调用次数和成本，用于限流。生成的每周复盘会保存在你的账号里。</li>
+    <li>开启「每周复盘邮件」后，每次数据变化会把最近一周的汇总（同样不含逐笔流水）存到服务器，用于周一早上自动生成复盘；关掉邮件就删除。</li>
     <li>每次发送前都可以点「查看将发送的内容」核对。</li>
   </ul>
   <label class="check"><input type="checkbox" id="consent-check"> 我已了解，同意把支出汇总发送给 AI 处理</label>
   <div class="dlg-actions"><button data-close>暂不使用</button><button id="consent-ok" class="primary" disabled>同意并继续</button></div>
+</dialog>
+
+<dialog id="dlg-account">
+  <h3 id="acc-title">登录</h3>
+  <p class="muted small" id="acc-sub"></p>
+  <form id="acc-form" class="acc-form">
+    <label id="acc-row-email">邮箱<input id="acc-email" type="email" autocomplete="username" maxlength="200"></label>
+    <label id="acc-row-old">原密码<input id="acc-old" type="password" autocomplete="current-password"></label>
+    <label id="acc-row-pw"><span id="acc-pw-label">密码</span><input id="acc-pw" type="password" autocomplete="current-password"></label>
+    <label id="acc-row-pw2">再输一次<input id="acc-pw2" type="password" autocomplete="new-password"></label>
+    <label id="acc-row-invite">邀请码（内测）<input id="acc-invite" autocomplete="off"></label>
+    <p class="error" id="acc-error"></p>
+    <div class="dlg-actions"><button type="button" data-close>取消</button><button id="acc-ok" class="primary">登录</button></div>
+  </form>
+  <p class="muted small" id="acc-note"></p>
 </dialog>
 
 <div id="tip" class="tooltip hidden"></div>
