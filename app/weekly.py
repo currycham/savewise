@@ -5,16 +5,18 @@
   快照还停在更早的周（上周账单还没导入），就发一封提醒，列出上周定的目标，请用户导入账单看结果。"""
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from html import escape
+from zoneinfo import ZoneInfo
 
 from . import llm, notify
-from .config import SITE_URL
+from .config import SITE_URL, TIMEZONE
 from .db import get_conn
 from .prompts import WEEKLY_SYSTEM
 
 log = logging.getLogger(__name__)
 MAX_CONTEXT_CHARS = 40_000
+last_result: dict | None = None  # 最近一次定时任务的结果，后台查看用（重启后清空）
 
 
 def context_text(context: dict) -> str:
@@ -98,6 +100,8 @@ def run(today: date | None = None) -> dict:
             log.exception("weekly review failed for user %s", user["id"])
             stats["failed"] += 1
     log.info("weekly job: %s", stats)
+    global last_result
+    last_result = {**stats, "at": datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%d %H:%M")}
     return stats
 
 

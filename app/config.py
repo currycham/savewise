@@ -13,7 +13,9 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 # 注册邀请码（内测）：留空表示开放注册。不登录也能用本地分析，AI 教练和每周复盘需要登录
 INVITE_CODE = os.getenv("INVITE_CODE", "").strip()
 SITE_URL = os.getenv("SITE_URL", "https://savewise.waywise.tech").rstrip("/")
-# 后台统计接口 /api/admin/stats 的口令；留空则关闭该接口
+# 这些邮箱注册或登录后自动成为管理员，后台在 /admin（逗号分隔）
+ADMIN_EMAILS = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
+# 脚本调用后台接口用的口令（请求头 X-Admin-Token），留空则只能登录后用
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 # 页面底部公示的模型与备案/登记信息（上线前按网信办登记结果填写）
 MODEL_DISCLOSURE = os.getenv("MODEL_DISCLOSURE", "AI 功能由 DeepSeek 大模型提供")

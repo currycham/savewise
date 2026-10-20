@@ -2,19 +2,18 @@
 流水的解析和分析在用户浏览器里完成；云同步的数据在浏览器里加密，服务器只存密文、解不开。"""
 import logging
 import re
-import secrets
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import costs, llm, notify, weekly
-from .auth import check_attempts, current_user, hash_pw, login_session, record_fail, verify_pw
-from .config import (ADMIN_TOKEN, BASE_DIR, DAILY_BUDGET_YUAN, DEEPSEEK_API_KEY, INVITE_CODE, MODEL_DISCLOSURE, SITE_URL,
-                     TIMEZONE, USER_DAILY_CALLS, VAULT_MAX_MB, WEEKLY_RUN_TIME)
+from . import admin, costs, llm, notify, weekly
+from .auth import check_attempts, current_user, hash_pw, login_session, record_fail, send_reset, user_from_session, verify_pw
+from .config import (ADMIN_EMAILS, BASE_DIR, DEEPSEEK_API_KEY, INVITE_CODE, MODEL_DISCLOSURE, TIMEZONE, USER_DAILY_CALLS,
+                     VAULT_MAX_MB, WEEKLY_RUN_TIME)
 from .db import get_conn, init_db
 from .prompts import CHAT_SYSTEM, CLASSIFY_SYSTEM, REVIEW_SYSTEM
 
@@ -36,6 +35,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="SaveWise", lifespan=lifespan, docs_url=None, redoc_url=None)
+app.include_router(admin.router)
 
 # 内容安全策略：页面只能连本站，浏览器里的流水不可能被脚本发到别的域名
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
@@ -84,7 +84,8 @@ def register(body: Credentials, request: Request, response: Response):
     with get_conn() as conn:
         if conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
             raise HTTPException(409, "这个邮箱已经注册过了，直接登录就行")
-        cur = conn.execute("INSERT INTO users (email, auth_hash) VALUES (?, ?)", (email, hash_pw(body.auth)))
+        cur = conn.execute("INSERT INTO users (email, auth_hash, role) VALUES (?, ?, ?)",
+                           (email, hash_pw(body.auth), "admin" if email in ADMIN_EMAILS else "user"))
     login_session(request, response, cur.lastrowid)
     return {"ok": True}
 
@@ -120,7 +121,7 @@ def me(user: dict = Depends(current_user)):
                              (user["id"],)).fetchone()
         snap = conn.execute("SELECT week, updated_at FROM snapshots WHERE user_id = ?", (user["id"],)).fetchone()
     return {
-        "email": user["email"], "weekly_email": bool(user["weekly_email"]),
+        "email": user["email"], "weekly_email": bool(user["weekly_email"]), "is_admin": user["role"] == "admin",
         "vault_version": vault["version"] if vault else 0, "vault_updated_at": vault["updated_at"] if vault else None,
         "vault_size": vault["size"] if vault else 0, "snapshot_week": snap["week"] if snap else None,
     }
@@ -190,20 +191,11 @@ class Forgot(BaseModel):
 def forgot_password(body: Forgot):
     if not notify.enabled():
         raise HTTPException(503, "服务器还没有配置邮件，暂时不能找回密码")
+    email = norm_email(body.email)
     with get_conn() as conn:
-        row = conn.execute("SELECT id FROM users WHERE email = ? AND banned = 0", (norm_email(body.email),)).fetchone()
-        if row:
-            token = secrets.token_urlsafe(32)
-            conn.execute("DELETE FROM password_resets WHERE user_id = ? OR expires_at < datetime('now')", (row["id"],))
-            conn.execute("INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+1 hour'))",
-                         (token, row["id"]))
+        row = conn.execute("SELECT id FROM users WHERE email = ? AND banned = 0", (email,)).fetchone()
     if row:
-        link = f"{SITE_URL}/#reset={token}"
-        notify.send(norm_email(body.email), "SaveWise：重设密码",
-                    f"<p>点下面的链接重设密码（1 小时内有效）：</p><p><a href='{link}'>{link}</a></p>"
-                    "<p style='color:#888'>云同步的数据是用旧密码加密的，重设后云端那份会清空；"
-                    "用存有数据的电脑或手机登录一次，就会用新密码重新同步。</p><p style='color:#888'>不是你本人操作的话，忽略这封邮件即可。</p>",
-                    f"重设密码（1 小时内有效）：{link}\n云端加密数据会清空，用存有数据的设备登录一次即可重新同步。")
+        send_reset(row["id"], email)
     return {"ok": True}  # 不透露邮箱是否注册过
 
 
@@ -385,38 +377,6 @@ def ai_classify(body: ClassifyBody, user: dict = Depends(current_user)):
     return {"items": valid}
 
 
-# ---------- 后台 ----------
-
-def admin(token: str) -> None:
-    """口令放在请求头 X-Admin-Token 里（放在 URL 里会进访问日志）。"""
-    if not ADMIN_TOKEN or not secrets.compare_digest(token, ADMIN_TOKEN):
-        raise HTTPException(404, "Not Found")
-
-
-@app.get("/api/admin/stats")
-def admin_stats(token: str = Header("", alias="X-Admin-Token")):
-    admin(token)
-    with get_conn() as conn:
-        days = [dict(r) for r in conn.execute(
-            "SELECT date(at, '+8 hours') AS day, task, COUNT(*) AS calls, COUNT(DISTINCT actor) AS users,"
-            " ROUND(SUM(cost), 4) AS cost FROM llm_usage GROUP BY day, task ORDER BY day DESC, task LIMIT 200")]
-        users = conn.execute(
-            "SELECT COUNT(*) AS total, SUM(last_seen_at >= datetime('now', '-7 day')) AS active7,"
-            " SUM(weekly_email) AS weekly_email FROM users").fetchone()
-        synced = conn.execute("SELECT COUNT(*) FROM vaults").fetchone()[0]
-        reports = conn.execute("SELECT week, COUNT(*) AS n, SUM(emailed_at IS NOT NULL) AS emailed FROM weekly_reports"
-                               " GROUP BY week ORDER BY week DESC LIMIT 8").fetchall()
-    return {"today_cost": round(costs.today_cost(), 4), "daily_budget": DAILY_BUDGET_YUAN, "users": dict(users),
-            "synced_users": synced, "weekly": [dict(r) for r in reports], "days": days}
-
-
-@app.post("/api/admin/weekly-run")
-def admin_weekly_run(token: str = Header("", alias="X-Admin-Token")):
-    """手动补跑周一的定时任务（已经发过的不会重复发）。"""
-    admin(token)
-    return weekly.run()
-
-
 STATIC = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -430,6 +390,14 @@ def service_worker():
 @app.get("/manifest.webmanifest")
 def manifest():
     return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
+
+
+@app.get("/admin")
+def admin_page(session: str | None = Cookie(default=None)):
+    user = user_from_session(session)
+    if not user or user["role"] != "admin":
+        raise HTTPException(404, "Not Found")
+    return FileResponse(STATIC / "admin.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.api_route("/", methods=["GET", "HEAD"])

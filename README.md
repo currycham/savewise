@@ -135,7 +135,16 @@ node --test tests/*.test.mjs
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` | 发每周复盘邮件和找回密码。不填就只能在页面上看每周复盘 |
 | `WEEKLY_RUN_TIME` | 每周一几点跑定时复盘，默认 08:00 |
 | `MODEL_DISCLOSURE` | 页面底部公示的模型和登记信息 |
-| `ADMIN_TOKEN` | 请求头 `X-Admin-Token` 带上它：`GET /api/admin/stats` 查看用户数、每周复盘和 AI 成本；`POST /api/admin/weekly-run` 手动补跑定时复盘 |
+| `ADMIN_EMAILS` | 这些邮箱注册后自动成为管理员，登录后在「数据 → 账号」里进后台（`/admin`） |
+| `ADMIN_TOKEN` | 可选，脚本用：请求头 `X-Admin-Token` 带上它就能调 `/api/admin/*`，例如 `POST /api/admin/weekly-run` 补跑定时复盘 |
+
+### 后台
+
+`/admin`，只有管理员能打开（其他人看到的是 404）。只看账号和用量，看不到任何人的流水。
+
+- **概览**：今日 AI 预算、DeepSeek 余额、用户数 / 活跃 / 云同步 / 每周邮件人数、近 7 天按功能和近 14 天按日的调用与成本。
+- **用户**：注册和最近访问时间、云同步大小、每周复盘数、AI 用量；设为管理员、停用（立即踢下线）、发重设密码邮件（密码只有用户自己知道，管理员不能代设）。
+- **每周复盘**：周一定时任务最近一次的结果、订阅用户的快照状态、近 12 周生成和发送情况，可以手动补跑。
 
 ## 部署
 
@@ -151,12 +160,12 @@ DEPLOY_HOST=ubuntu@<服务器IP> DEPLOY_KEY=~/.ssh/<你的密钥> deploy/deploy.
 ## 目录
 
 ```
-app/          main.py 接口与安全头 · auth.py 账号 · weekly.py 每周复盘与邮件 · notify.py 发邮件
+app/          main.py 接口与安全头 · admin.py 后台接口 · auth.py 账号 · weekly.py 每周复盘与邮件 · notify.py 发邮件
               prompts.py 提示词 · llm.py DeepSeek 调用 · costs.py 预算与限次 · db.py 表结构
-static/       index.html · style.css · sw.js（离线）· manifest
+static/       index.html · admin.html 后台 · style.css · sw.js（离线）· manifest
 static/js/    app.js 界面 · parse.js / files.js 导入 · categorize.js 分类与四象限 · analyze.js 体检与可砍规则
               plan.js 计划 · weekly.js 每周复盘 · account.js 加密同步 · ai.js 汇总与 AI 调用
-              charts.js 图表 · store.js 本地存储 · demo.js 演示数据
+              charts.js 图表 · store.js 本地存储 · demo.js 演示数据 · admin.js 后台
 tests/        make_fixtures.mjs 生成测试文件 · engine.test.mjs 解析与分析 · weekly.test.mjs 每周复盘与加密同步
 deploy/       部署脚本、systemd、Caddy、备份
 docs/         调研与决策、截图

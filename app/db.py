@@ -6,7 +6,7 @@
 import sqlite3
 from contextlib import contextmanager
 
-from .config import DB_PATH
+from .config import ADMIN_EMAILS, DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     auth_hash TEXT NOT NULL,
     weekly_email INTEGER DEFAULT 1,
     reminded_week TEXT DEFAULT '',     -- 最近一次发“上周账单还没导入”提醒的周，避免重复发
+    role TEXT DEFAULT 'user',          -- user / admin
     banned INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TEXT
@@ -67,10 +68,22 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_actor ON llm_usage (actor, at);
 """
 
 
+# 已有数据库上补加的列：(表, 列, 定义)
+MIGRATIONS = [
+    ("users", "role", "TEXT DEFAULT 'user'"),
+]
+
+
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        for table, col, ddl in MIGRATIONS:
+            if col not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+        if ADMIN_EMAILS:
+            conn.execute(f"UPDATE users SET role = 'admin' WHERE email IN ({','.join('?' * len(ADMIN_EMAILS))})",
+                         ADMIN_EMAILS)
 
 
 @contextmanager

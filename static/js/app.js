@@ -641,6 +641,7 @@ function accountSection() {
       <button id="a-pw">修改密码</button>
       <button id="a-logout">退出登录</button>
       <button id="a-delete" class="ghost danger">注销账号</button>
+      ${S.me?.is_admin ? '<a href="/admin" class="small">后台管理 →</a>' : ""}
     </div></section>`;
 }
 

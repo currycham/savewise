@@ -5,8 +5,10 @@ import secrets
 import time
 from collections import defaultdict
 
-from fastapi import Cookie, HTTPException, Request, Response
+from fastapi import Cookie, Header, HTTPException, Request, Response
 
+from . import notify
+from .config import ADMIN_TOKEN, SITE_URL
 from .db import get_conn
 
 SESSION_DAYS = 90
@@ -56,9 +58,34 @@ def current_user(session: str | None = Cookie(default=None)) -> dict:
     return user
 
 
+def admin_user(session: str | None = Cookie(default=None), token: str = Header("", alias="X-Admin-Token")) -> dict:
+    """登录的管理员，或者脚本带上请求头 X-Admin-Token（放在 URL 里会进访问日志）。其他人一律 404，不暴露后台。"""
+    if ADMIN_TOKEN and token and secrets.compare_digest(token, ADMIN_TOKEN):
+        return {"id": 0, "email": "token"}
+    user = user_from_session(session)
+    if not user or user["role"] != "admin":
+        raise HTTPException(404, "Not Found")
+    return user
+
+
 def login_session(request: Request, response: Response, user_id: int) -> None:
     token = secrets.token_urlsafe(32)
     with get_conn() as conn:
         conn.execute("INSERT INTO sessions (token, user_id) VALUES (?, ?)", (token, user_id))
     response.set_cookie("session", token, httponly=True, samesite="lax", secure=request.url.scheme == "https",
                         max_age=60 * 60 * 24 * SESSION_DAYS)
+
+
+def send_reset(user_id: int, email: str) -> None:
+    """生成 1 小时有效的重设密码链接发到邮箱（用户自己找回、管理员代发都走这里）。"""
+    token = secrets.token_urlsafe(32)
+    with get_conn() as conn:
+        conn.execute("DELETE FROM password_resets WHERE user_id = ? OR expires_at < datetime('now')", (user_id,))
+        conn.execute("INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+1 hour'))",
+                     (token, user_id))
+    link = f"{SITE_URL}/#reset={token}"
+    notify.send(email, "SaveWise：重设密码",
+                f"<p>点下面的链接重设密码（1 小时内有效）：</p><p><a href='{link}'>{link}</a></p>"
+                "<p style='color:#888'>云同步的数据是用旧密码加密的，重设后云端那份会清空；"
+                "用存有数据的电脑或手机登录一次，就会用新密码重新同步。</p><p style='color:#888'>不是你本人操作的话，忽略这封邮件即可。</p>",
+                f"重设密码（1 小时内有效）：{link}\n云端加密数据会清空，用存有数据的设备登录一次即可重新同步。")

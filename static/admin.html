@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SaveWise 后台</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#overview">SaveWise <span>后台</span></a>
+  <nav class="nav">
+    <a href="#overview" data-tab="overview">概览</a>
+    <a href="#users" data-tab="users">用户</a>
+    <a href="#weekly" data-tab="weekly">每周复盘</a>
+  </nav>
+  <a href="/" class="small-btn muted">← 回到网站</a>
+</header>
+<main id="app"><div id="view"></div></main>
+<div id="toast" class="toast hidden"></div>
+<script src="/static/js/admin.js"></script>
+</body>
+</html>
