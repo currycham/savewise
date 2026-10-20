@@ -24,7 +24,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-BASE=/srv/trimwise
+BASE=/srv/savewise
 SSH_CMD="ssh -o ServerAliveInterval=30${DEPLOY_KEY:+ -i $DEPLOY_KEY -o IdentitiesOnly=yes}"
 SSH="$SSH_CMD $HOST"
 export RSYNC_RSH="$SSH_CMD"
@@ -34,8 +34,8 @@ if [ -n "$(git status --porcelain 2>/dev/null)" ]; then echo "提示：有未提
 
 if [ "$SETUP" = 1 ]; then
   echo "==> 初始化服务器"
-  rsync -az --delete deploy/ "$HOST:/tmp/trimwise-deploy/"
-  $SSH "sudo bash /tmp/trimwise-deploy/setup-server.sh"
+  rsync -az --delete deploy/ "$HOST:/tmp/savewise-deploy/"
+  $SSH "sudo bash /tmp/savewise-deploy/setup-server.sh"
 fi
 
 echo "==> 同步代码"
@@ -52,22 +52,22 @@ if ! $SSH "sudo test -f $BASE/app/.env"; then
   echo "!! 服务器上还没有 .env：DEPLOY_HOST=$HOST deploy/deploy.sh --env 你的.env"
   exit 1
 fi
-$SSH "sudo chown -R trimwise:trimwise $BASE/app $BASE/data && sudo chmod 600 $BASE/app/.env"
+$SSH "sudo chown -R savewise:savewise $BASE/app $BASE/data && sudo chmod 600 $BASE/app/.env"
 
 echo "==> 安装依赖"
-$SSH "sudo -u trimwise -H env PIP_CONFIG_FILE=$BASE/pip.conf $BASE/venv/bin/pip install -q --disable-pip-version-check -r $BASE/app/requirements.txt"
+$SSH "sudo -u savewise -H env PIP_CONFIG_FILE=$BASE/pip.conf $BASE/venv/bin/pip install -q --disable-pip-version-check -r $BASE/app/requirements.txt"
 
 echo "==> 重启服务"
-$SSH "sudo systemctl restart trimwise"
+$SSH "sudo systemctl restart savewise"
 
 echo "==> 检查"
 for i in $(seq 1 20); do
   if $SSH "curl -fsS -o /dev/null http://127.0.0.1:8200/" 2>/dev/null; then
-    echo "网站已启动：https://trimwise.waywise.tech"
-    echo "看日志：ssh $HOST sudo journalctl -u trimwise -f"
+    echo "网站已启动：https://savewise.waywise.tech"
+    echo "看日志：ssh $HOST sudo journalctl -u savewise -f"
     exit 0
   fi
   sleep 2
 done
-echo "!! 网站 40 秒内没有响应，看日志：ssh $HOST sudo journalctl -u trimwise -n 100"
+echo "!! 网站 40 秒内没有响应，看日志：ssh $HOST sudo journalctl -u savewise -n 100"
 exit 1

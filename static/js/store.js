@@ -1,6 +1,6 @@
 // 本地存储：所有流水和设置只存在这台设备的浏览器里（IndexedDB），不上传服务器。
 // 一个简单的键值库；IndexedDB 不可用（隐私模式等）时退回内存，刷新就没了。
-const DB = "trimwise", STORE = "kv";
+const DB = "savewise", STORE = "kv";
 let dbp = null;
 const mem = new Map();
 

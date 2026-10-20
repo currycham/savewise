@@ -708,13 +708,13 @@ bind.viewData = () => {
   if ($("#a-logout")) $("#a-logout").onclick = logout;
   if ($("#a-delete")) $("#a-delete").onclick = deleteAccount;
   $("#backup").onclick = async () => {
-    download(`trimwise-备份-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await bundle()));
+    download(`savewise-备份-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await bundle()));
   };
   $("#restore").onclick = () => $("#restore-file").click();
   $("#restore-file").onchange = async (e) => {
     try {
       const data = JSON.parse(await e.target.files[0].text());
-      if (data.app !== "trimwise") throw new Error("不是 TrimWise 的备份文件");
+      if (data.app !== "savewise") throw new Error("不是 SaveWise 的备份文件");
       if (!confirm(S.account ? "恢复会覆盖本机和云端现有的数据，继续？" : "恢复会覆盖本机现有的数据，继续？")) return;
       await applyBundle(data);
       if (S.account) {
@@ -839,18 +839,18 @@ bind.viewWeekly = () => {
 // 日历提醒（.ics）：rule 是 RRULE 的 FREQ 部分
 function calendar(rule, title, desc) {
   const first = rule.startsWith("WEEKLY") ? addDays(mondayOf(ymd(new Date())), 7) : `${addMonths(ymd(new Date()).slice(0, 7), 1)}-01`;
-  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TrimWise//CN", "BEGIN:VEVENT",
-    `UID:trimwise-${rule.slice(0, 6).toLowerCase()}-${S.settings.deviceId}`, `DTSTART;TZID=Asia/Shanghai:${first.replaceAll("-", "")}T200000`, "DURATION:PT20M",
-    `RRULE:FREQ=${rule}`, `SUMMARY:TrimWise ${title}`, `DESCRIPTION:${desc} ${location.origin}`,
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//SaveWise//CN", "BEGIN:VEVENT",
+    `UID:savewise-${rule.slice(0, 6).toLowerCase()}-${S.settings.deviceId}`, `DTSTART;TZID=Asia/Shanghai:${first.replaceAll("-", "")}T200000`, "DURATION:PT20M",
+    `RRULE:FREQ=${rule}`, `SUMMARY:SaveWise ${title}`, `DESCRIPTION:${desc} ${location.origin}`,
     "BEGIN:VALARM", "TRIGGER:-PT0M", "ACTION:DISPLAY", `DESCRIPTION:${title}`, "END:VALARM", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
-  download(`trimwise-${title}.ics`, ics, "text/calendar");
+  download(`savewise-${title}.ics`, ics, "text/calendar");
 }
 
 // ---------- 账号与同步 ----------
 const hasLocalData = () => S.datasets.length > 0;
 
 async function bundle() {
-  const data = { app: "trimwise", version: 1, exportedAt: new Date().toISOString(), datasets: S.datasets, tx: {} };
+  const data = { app: "savewise", version: 1, exportedAt: new Date().toISOString(), datasets: S.datasets, tx: {} };
   for (const d of S.datasets) data.tx[d.id] = (await store.get(`tx:${d.id}`)) || [];
   for (const k of SYNCED) data[k] = S[k];
   return data;

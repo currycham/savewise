@@ -12,7 +12,7 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 # 注册邀请码（内测）：留空表示开放注册。不登录也能用本地分析，AI 教练和每周复盘需要登录
 INVITE_CODE = os.getenv("INVITE_CODE", "").strip()
-SITE_URL = os.getenv("SITE_URL", "https://trimwise.waywise.tech").rstrip("/")
+SITE_URL = os.getenv("SITE_URL", "https://savewise.waywise.tech").rstrip("/")
 # 后台统计接口 /api/admin/stats 的口令；留空则关闭该接口
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 # 页面底部公示的模型与备案/登记信息（上线前按网信办登记结果填写）
@@ -43,4 +43,4 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
 
-DB_PATH = Path(os.getenv("DB_PATH", BASE_DIR / "data" / "trimwise.db"))
+DB_PATH = Path(os.getenv("DB_PATH", BASE_DIR / "data" / "savewise.db"))

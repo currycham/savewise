@@ -1,0 +1,20 @@
+[Unit]
+Description=SaveWise 节流教练（FastAPI：静态页面、账号与加密同步、AI 代理、每周复盘定时任务）
+After=network.target
+
+[Service]
+Type=simple
+User=savewise
+Group=savewise
+WorkingDirectory=/srv/savewise/app
+Environment=DB_PATH=/srv/savewise/data/savewise.db
+Environment=TZ=Asia/Shanghai
+# 只监听本机，由 Caddy 对外提供 HTTPS；每周复盘的定时任务在进程内运行，必须只有 1 个 worker
+ExecStart=/srv/savewise/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8200 --workers 1 --proxy-headers
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -124,7 +124,7 @@ def _run_user(user: dict, week: str) -> str:
     if not notify.enabled():
         return "generated" if result == "generated" else "skipped"
     if report:
-        notify.send(user["email"], f"TrimWise 每周复盘 {_range(week)}：{report['headline']}", _html(report), _text(report))
+        notify.send(user["email"], f"SaveWise 每周复盘 {_range(week)}：{report['headline']}", _html(report), _text(report))
         with get_conn() as conn:
             conn.execute("UPDATE weekly_reports SET emailed_at = CURRENT_TIMESTAMP WHERE user_id = ? AND week = ?",
                          (user["id"], week))
@@ -132,7 +132,7 @@ def _run_user(user: dict, week: str) -> str:
     if user["reminded_week"] == week:
         return "skipped"
     goals = _goals_for(user["id"], week)
-    notify.send(user["email"], f"TrimWise：导入上周的账单，看看目标完成了没有（{_range(week)}）",
+    notify.send(user["email"], f"SaveWise：导入上周的账单，看看目标完成了没有（{_range(week)}）",
                 _reminder_html(goals), _reminder_text(goals))
     with get_conn() as conn:
         conn.execute("UPDATE users SET reminded_week = ? WHERE id = ?", (week, user["id"]))
@@ -171,7 +171,7 @@ def _stats_line(s: dict) -> str:
 
 
 STYLE = "font-family:-apple-system,'PingFang SC',sans-serif;max-width:600px;line-height:1.7;color:#222"
-FOOT = (f"<p style='margin-top:24px'><a href='{SITE_URL}/#weekly' style='color:#0f7b6c'>打开 TrimWise 查看每周复盘 →</a></p>"
+FOOT = (f"<p style='margin-top:24px'><a href='{SITE_URL}/#weekly' style='color:#0f7b6c'>打开 SaveWise 查看每周复盘 →</a></p>"
         "<p style='color:#999;font-size:12px'>复盘由 AI 根据你的支出汇总生成，金额来自规则计算，仅供参考，不构成投资建议。"
         "不想收到可以在网站「数据 → 账号」里关闭每周邮件。</p>")
 
@@ -186,7 +186,7 @@ def _html(r: dict) -> str:
         for g in r.get("goals", []))
     bullets = lambda xs: "".join(f"<li>{escape(x)}</li>" for x in xs)  # noqa: E731
     return f"""<div style="{STYLE}">
-<p style="color:#888;font-size:13px;margin:0">TrimWise 每周复盘 · {_range(r['week'])}</p>
+<p style="color:#888;font-size:13px;margin:0">SaveWise 每周复盘 · {_range(r['week'])}</p>
 <h2 style="margin:4px 0 8px">{escape(r['headline'])}</h2>
 <p style="color:#555">{escape(_stats_line(r.get('stats', {})))}</p>
 {f"<h3>上周的目标</h3><ul>{last}</ul>" if last else ""}
@@ -198,7 +198,7 @@ def _html(r: dict) -> str:
 
 
 def _text(r: dict) -> str:
-    lines = [f"TrimWise 每周复盘 {_range(r['week'])}", r["headline"], _stats_line(r.get("stats", {})), ""]
+    lines = [f"SaveWise 每周复盘 {_range(r['week'])}", r["headline"], _stats_line(r.get("stats", {})), ""]
     if r.get("lastWeekGoals"):
         lines += ["上周的目标："] + [f"  {'✓' if g.get('result') == '达成' else '✗'} {g.get('goal')}" for g in r["lastWeekGoals"]] + [""]
     lines += ["这周做这 3 件事："] + [f"  {i + 1}. {g.get('text')}" for i, g in enumerate(r.get("goals", []))]
@@ -215,7 +215,7 @@ def _reminder_html(goals: list[dict]) -> str:
     items = "".join(f"<li>{escape(g.get('text', ''))}</li>" for g in goals)
     return f"""<div style="{STYLE}">
 <h2 style="margin:0 0 8px">上周的账单还没导入</h2>
-<p>TrimWise 还看不到上周花了多少。花 3 分钟导入上周的账单，就能看到目标完成了没有，并拿到这周的 3 个目标。</p>
+<p>SaveWise 还看不到上周花了多少。花 3 分钟导入上周的账单，就能看到目标完成了没有，并拿到这周的 3 个目标。</p>
 {f"<h3>上周你定的目标</h3><ul>{items}</ul>" if items else ""}
 <p style="color:#555;font-size:14px">{escape(HOWTO)}</p>
 {FOOT}</div>"""

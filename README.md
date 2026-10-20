@@ -1,8 +1,8 @@
-# TrimWise 节流教练
+# SaveWise 节流教练
 
 > 别再凭感觉砍，让你的流水告诉你钱漏在哪。
 
-TrimWise 不是又一个记账 App。它的用法是：
+SaveWise 不是又一个记账 App。它的用法是：
 
 1. 把随手记、微信支付、支付宝的账单导进来。
 2. 它找出**无感的小额高频**、**还在扣钱的订阅**、**深夜冲动的大额消费**和**悄悄膨胀的分类**，算出每一项一年能省多少。
@@ -11,7 +11,7 @@ TrimWise 不是又一个记账 App。它的用法是：
 
 **流水在你的浏览器里解析。登录后流水先在浏览器里加密再同步，服务器只存密文，解不开。**
 
-线上地址（计划）：https://trimwise.waywise.tech　·　产品调研与形态选择见 [docs/调研与决策.md](docs/调研与决策.md)
+线上地址（计划）：https://savewise.waywise.tech　·　产品调研与形态选择见 [docs/调研与决策.md](docs/调研与决策.md)
 
 ![体检](docs/screenshots/overview.png)
 
@@ -24,7 +24,7 @@ TrimWise 不是又一个记账 App。它的用法是：
 3. **月底又超支。** 没有一个简单的机制，把“年度目标”变成“这个月还能花多少”。
 4. **问 AI 只得到正确的废话。** 把账单丢给聊天机器人，得到的是“控制购物类支出，可省 20–30%”。算不准，也落不了地。
 
-所以 TrimWise 的原则是：
+所以 SaveWise 的原则是：
 
 - **做决策，不做记账**：你已经记了好几年账，不用再记一遍。
 - **规则算数，AI 说话**：每一项可省金额都由确定性规则算出，能追溯到具体交易。AI 只负责解释、排序、出主意，不编数字。
@@ -139,14 +139,14 @@ node --test tests/*.test.mjs
 
 ## 部署
 
-和 investwise 一样：systemd + Caddy，端口 8200，域名 `trimwise.waywise.tech`。
+和 investwise 一样：systemd + Caddy，端口 8200，域名 `savewise.waywise.tech`。
 
 ```bash
 DEPLOY_HOST=ubuntu@<服务器IP> DEPLOY_KEY=~/.ssh/<你的密钥> deploy/deploy.sh --setup --env .env   # 第一次
 DEPLOY_HOST=ubuntu@<服务器IP> DEPLOY_KEY=~/.ssh/<你的密钥> deploy/deploy.sh                      # 以后每次
 ```
 
-上线前要先把 `trimwise.waywise.tech` 解析到服务器。
+上线前要先把 `savewise.waywise.tech` 解析到服务器。
 
 ## 目录
 

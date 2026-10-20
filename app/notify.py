@@ -13,7 +13,7 @@ def enabled() -> bool:
 def send(to: str, subject: str, html: str, text: str) -> None:
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = formataddr(("TrimWise 节流教练", SMTP_FROM or SMTP_USER))
+    msg["From"] = formataddr(("SaveWise 节流教练", SMTP_FROM or SMTP_USER))
     msg["To"] = to
     msg.set_content(text)
     msg.add_alternative(html, subtype="html")

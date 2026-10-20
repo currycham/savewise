@@ -1,4 +1,4 @@
-"""TrimWise 后端：静态页面、账号、加密云同步、每周复盘、AI 代理（预算、限流、记账）。
+"""SaveWise 后端：静态页面、账号、加密云同步、每周复盘、AI 代理（预算、限流、记账）。
 流水的解析和分析在用户浏览器里完成；云同步的数据在浏览器里加密，服务器只存密文、解不开。"""
 import logging
 import re
@@ -35,7 +35,7 @@ async def lifespan(_app):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="TrimWise", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="SaveWise", lifespan=lifespan, docs_url=None, redoc_url=None)
 
 # 内容安全策略：页面只能连本站，浏览器里的流水不可能被脚本发到别的域名
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
@@ -199,7 +199,7 @@ def forgot_password(body: Forgot):
                          (token, row["id"]))
     if row:
         link = f"{SITE_URL}/#reset={token}"
-        notify.send(norm_email(body.email), "TrimWise：重设密码",
+        notify.send(norm_email(body.email), "SaveWise：重设密码",
                     f"<p>点下面的链接重设密码（1 小时内有效）：</p><p><a href='{link}'>{link}</a></p>"
                     "<p style='color:#888'>云同步的数据是用旧密码加密的，重设后云端那份会清空；"
                     "用存有数据的电脑或手机登录一次，就会用新密码重新同步。</p><p style='color:#888'>不是你本人操作的话，忽略这封邮件即可。</p>",

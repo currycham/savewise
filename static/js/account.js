@@ -9,7 +9,7 @@ const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart
 export async function deriveKeys(email, password) {
   email = email.trim().toLowerCase();
   const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits", "deriveKey"]);
-  const params = (purpose) => ({ name: "PBKDF2", hash: "SHA-256", salt: enc.encode(`trimwise-${purpose}|${email}`), iterations: ITER });
+  const params = (purpose) => ({ name: "PBKDF2", hash: "SHA-256", salt: enc.encode(`savewise-${purpose}|${email}`), iterations: ITER });
   const auth = hex(await crypto.subtle.deriveBits(params("auth"), base, 256));
   const key = await crypto.subtle.deriveKey(params("data"), base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
   return { auth, key };
