@@ -11,7 +11,7 @@ SaveWise 不是又一个记账 App。它的用法是：
 
 **流水在你的浏览器里解析。登录后流水先在浏览器里加密再同步，服务器只存密文，解不开。**
 
-线上地址（计划）：https://savewise.waywise.tech　·　产品调研与形态选择见 [docs/调研与决策.md](docs/调研与决策.md)
+线上地址：https://savewise.waywise.tech（内测中）　·　产品调研与形态选择见 [docs/调研与决策.md](docs/调研与决策.md)
 
 ![体检](docs/screenshots/overview.png)
 
