@@ -1,5 +1,5 @@
 """后台管理接口：仅管理员（或带 X-Admin-Token 的脚本）可用，其他人一律 404。
-只看账号和用量，看不到流水：云端只有密文，快照和复盘的内容也不在后台展示。"""
+只看账号和用量，看不到流水：服务器上只有密文，没有明文的汇总或复盘。"""
 import threading
 import time
 from datetime import datetime, timedelta
@@ -9,15 +9,16 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from . import costs, notify, weekly
+from . import costs, notify, review
 from .auth import admin_user, send_reset
 from .config import ADMIN_EMAILS, DAILY_BUDGET_YUAN, DEEPSEEK_API_KEY, TIMEZONE, USER_DAILY_CALLS, WEEKLY_RUN_TIME
 from .db import get_conn
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(admin_user)])
 
-TASKS = {"review": "月度复盘", "chat": "AI 提问", "classify": "AI 归类", "weekly-app": "每周复盘（页面生成）",
-         "weekly-job": "每周复盘（周一定时）"}
+TASKS = {"review": "月度复盘（旧）", "chat": "AI 提问", "classify": "AI 归类", "weekly-app": "每周复盘（旧，页面生成）",
+         "weekly-job": "每周复盘（旧，定时）", "review-app": "复盘", "review-job": "复盘（旧，定时）",
+         "recap-email": "复盘发邮件"}
 
 
 def _local(utc: str | None) -> str | None:
@@ -95,7 +96,6 @@ def users():
         rows = [dict(r) for r in conn.execute(
             """SELECT u.id, u.email, u.role, u.banned, u.weekly_email, u.created_at, u.last_seen_at,
                  v.updated_at AS synced_at, COALESCE(LENGTH(v.data), 0) AS vault_size,
-                 (SELECT COUNT(*) FROM weekly_reports w WHERE w.user_id = u.id) AS reports,
                  (SELECT COUNT(*) FROM llm_usage x WHERE x.actor = 'u' || u.id AND x.at >= ?) AS calls_30d,
                  (SELECT COALESCE(SUM(cost), 0) FROM llm_usage x WHERE x.actor = 'u' || u.id) AS cost_total
                FROM users u LEFT JOIN vaults v ON v.user_id = u.id ORDER BY u.id DESC""", (month,))]
@@ -156,38 +156,36 @@ def send_reset_link(user_id: int, admin: dict = Depends(admin_user)):
     return {"ok": True}
 
 
-# ---------- 每周复盘 ----------
+# ---------- 复盘 ----------
 
 _run_state: dict = {"running": False, "error": None}
 
 
 @router.get("/weekly")
-def weekly_stats():
-    last = weekly.last_week()
+def recap_stats():
     with get_conn() as conn:
-        weeks = [dict(r) for r in conn.execute(
-            "SELECT week, COUNT(*) AS reports, SUM(source = 'app') AS by_app, SUM(source = 'job') AS by_job,"
-            " SUM(emailed_at IS NOT NULL) AS emailed FROM weekly_reports GROUP BY week ORDER BY week DESC LIMIT 12")]
-        pending = conn.execute(
-            """SELECT SUM(s.week = ?) AS ready, SUM(s.week < ?) AS stale,
-                 SUM(s.user_id IS NULL) AS no_snapshot, COUNT(*) AS subscribed
-               FROM users u LEFT JOIN snapshots s ON s.user_id = u.id
-               WHERE u.weekly_email = 1 AND u.banned = 0""", (last, last)).fetchone()
-        reminded = conn.execute("SELECT COUNT(*) FROM users WHERE reminded_week = ?", (last,)).fetchone()[0]
-    return {"last_week": last, "run_time": WEEKLY_RUN_TIME, "email_enabled": notify.enabled(), "weeks": weeks,
-            "subscribers": {**{k: v or 0 for k, v in dict(pending).items()}, "reminded": reminded},
-            "run": {**_run_state, "last": weekly.last_result}}
+        subs = conn.execute("SELECT cadence, reminded_week FROM users WHERE weekly_email = 1 AND banned = 0").fetchall()
+        legacy = conn.execute("SELECT COUNT(*) FROM weekly_reports").fetchone()[0]
+    by_cadence: dict[str, int] = {}
+    reminded = 0
+    for u in subs:
+        c = u["cadence"] or "month"
+        by_cadence[c] = by_cadence.get(c, 0) + 1
+        reminded += u["reminded_week"] == review.last_period(c)
+    return {"last": {c: review.last_period(c) for c in review.CADENCES}, "run_time": WEEKLY_RUN_TIME,
+            "email_enabled": notify.enabled(), "subscribed": len(subs), "reminded": reminded, "by_cadence": by_cadence,
+            "legacy": legacy, "run": {**_run_state, "last": review.last_result}}
 
 
 @router.post("/weekly-run")
-def weekly_run():
-    """手动补跑周一的定时任务（已经发过的不会重复发）。逐个用户调 AI，比较慢，放到后台跑。"""
+def recap_run():
+    """手动补跑每天的提醒任务（每期只提醒一次，不会重复发）。"""
     if _run_state["running"]:
         raise HTTPException(409, "正在运行")
 
     def work():
         try:
-            weekly.run()
+            review.run()
         except Exception as e:
             _run_state["error"] = str(e)[:200]
         finally:

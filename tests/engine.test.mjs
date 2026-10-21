@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { test } from "node:test";
-import { opportunities, overview, totalSaving, windowOf } from "../static/js/analyze.js";
+import { CUTS, opportunities, overview, totalSaving, windowOf } from "../static/js/analyze.js";
 import { demoTransactions } from "../static/js/demo.js";
 import { parseCSV, parseFile, parseRows } from "../static/js/parse.js";
 import { cardLedger, defaultPlan, freedomFund } from "../static/js/plan.js";
@@ -46,7 +46,7 @@ test("随手记 Excel：多个工作表、保留用户自己的分类", async ()
   assert.equal(exp.length, demo.length);
   assert.ok(exp.every((t) => t.type === "expense"));
   assert.equal(sheets[2].txs[0].type, "transfer");
-  assert.ok(exp.some((t) => t.cat1 === "宝宝" && t.cat2 === "早教课程"));
+  assert.ok(exp.some((t) => t.cat1 === "子女教育" && t.cat2 === "兴趣班"));
   assert.equal(Math.round(exp.reduce((a, t) => a + t.amount, 0)), Math.round(demo.reduce((a, t) => a + t.amount, 0)));
 });
 
@@ -68,9 +68,21 @@ const txs = demoTransactions();
 const ov = overview(txs);
 const opps = opportunities(txs);
 
-test("分析窗口：最后一个月不满就往前推一个月", () => {
-  assert.deepEqual(windowOf(txs), { start: "2025-10", end: "2026-09", months: 12, scale: 1, prevStart: "2024-10", prevEnd: "2025-09", hasPrev: true, first: "2020-11", last: "2026-10-19" });
-  assert.ok(ov.last12 > 650000 && ov.last12 < 800000);
+test("分析窗口：最后一个月不满就往前推一个月；同比按日历年的同期", () => {
+  const w = windowOf(txs);
+  assert.deepEqual({ ...w, ytd: undefined }, { start: "2025-10", end: "2026-09", months: 12, scale: 1, first: "2021-01", firstFull: "2021-01", last: "2026-10-19", ytd: undefined });
+  assert.deepEqual(w.ytd, { year: "2026", start: "2026-01", end: "2026-09", months: 9, prevStart: "2025-01", prevEnd: "2025-09", hasPrev: true, label: "2026 年 1–9 月" });
+  assert.ok(ov.last12 > 380000 && ov.last12 < 500000, String(ov.last12));
+  const sumYtd = txs.filter((t) => t.type === "expense" && t.date >= "2026-01" && t.date < "2026-10").reduce((a, t) => a + t.amount, 0);
+  assert.ok(Math.abs(ov.ytd.expense - sumYtd) < 1);
+  assert.ok(Math.abs(ov.cats.reduce((a, c) => a + c.ytdPrev, 0) - ov.ytd.prevExpense) < 1, "分类加起来等于去年同期合计");
+});
+
+test("1、2 月同期太短：改成去年全年对比前年全年", () => {
+  const feb = txs.filter((t) => t.date < "2026-02-27");
+  const y = windowOf(feb).ytd;
+  assert.equal(y.label, "2025 年全年");
+  assert.deepEqual([y.prevStart, y.prevEnd, y.hasPrev], ["2024-01", "2024-12", true]);
 });
 
 test("只有几个月的数据：按月份折算成一年，不做同比", () => {
@@ -78,34 +90,56 @@ test("只有几个月的数据：按月份折算成一年，不做同比", () =>
   const w = windowOf(short);
   assert.equal(w.start, "2026-07");
   assert.equal(w.months, 3);
-  assert.equal(w.hasPrev, false);
+  assert.equal(w.ytd.hasPrev, false);
   const o = overview(short);
   const raw = short.filter((t) => t.type === "expense" && t.date < "2026-10").reduce((a, t) => a + t.amount, 0);
   assert.ok(Math.abs(o.last12 - raw * 4) < 1);
-  assert.equal(o.prev12, 0);
   assert.ok(!opportunities(short).some((x) => x.type === "inflate"));
 });
 
-test("可砍清单：找到订阅、无感支出、冲动消费、保健品审计，不把房租当订阅", () => {
+test("可砍清单：找到订阅（含涨过价的）、无感支出、单价审计，不把房贷、兴趣班月费当订阅", () => {
   const titles = opps.map((o) => `${o.type}:${o.title}`);
-  for (const name of ["爱奇艺", "iCloud+", "乐刻健身", "Keep"]) assert.ok(titles.some((t) => t.startsWith("subscription:") && t.includes(name)), name);
-  assert.ok(!titles.some((t) => t.startsWith("subscription:") && /房东|王阿姨|天猫/.test(t)), "房租、阿姨、双11 不是订阅");
+  for (const name of ["腾讯视频", "iCloud+", "威尔仕健身", "B站大会员"]) assert.ok(titles.some((t) => t.startsWith("subscription:") && t.includes(name)), name);
+  assert.ok(!titles.some((t) => t.startsWith("subscription:") && /银行按揭|物业|钢琴|猫粮|体检/.test(t)), "房贷、物业、钢琴课、猫粮、体检不是订阅");
   assert.ok(titles.some((t) => t.startsWith("small:外卖")));
-  assert.ok(titles.some((t) => t.startsWith("audit:保健品")));
-  const impulse = opps.find((o) => o.type === "impulse");
-  const course = impulse.detail.items.find((t) => t.merchant.includes("AI训练营"));
-  assert.ok(course.flags.includes("深夜下单") && course.flags.includes("备注里有情绪词"));
+  assert.ok(titles.some((t) => t.startsWith("audit:兴趣班")));
+  assert.ok(titles.some((t) => t.startsWith("inflate:兴趣班") && t.includes("比去年同期")));
+});
+
+test("大额支出：阈值可调，固定刚性不算，按金额从大到小", () => {
+  const big = opps.find((o) => o.type === "big");
+  const items = big.detail.items;
+  assert.ok(items.length >= 10 && items.every((t) => t.amount >= 2000));
+  assert.ok(!items.some((t) => /按揭|保险/.test(t.cat2)), "按揭、保险是固定刚性");
+  assert.ok(items.every((t, i) => !i || items[i - 1].amount >= t.amount));
+  const big5k = opportunities(txs, { opts: { bigMin: 5000 } }).find((o) => o.type === "big");
+  assert.ok(big5k.detail.items.length < items.length && big5k.detail.items.every((t) => t.amount >= 5000));
+  assert.ok(!("flags" in items[0]), "不再标深夜下单：记账时间不是消费时间");
+});
+
+test("决定去做的力度：默认不一刀砍掉，可以选", () => {
+  const inf = opps.find((o) => o.type === "inflate");
+  assert.equal(inf.cut, CUTS.inflate.def);
+  assert.ok(inf.cut < 1, "默认只压一半涨幅");
+  const full = opportunities(txs, { cuts: { [inf.id]: 1 } }).find((o) => o.id === inf.id);
+  assert.ok(Math.abs(full.saving - inf.saving * 2) < 1);
+  const small = opps.find((o) => o.type === "small");
+  assert.ok(Math.abs(small.saving - small.annual * CUTS.small.def) < 1);
+  const bogus = opportunities(txs, { cuts: { [small.id]: 0.77 } }).find((o) => o.id === small.id);
+  assert.equal(bogus.cut, CUTS.small.def, "不在选项里的值回到默认");
 });
 
 test("合计可省：同一笔交易只算一次，忽略的不算，复盘为不值的计入", () => {
   const all = totalSaving(txs, opps);
-  assert.ok(all > 50000 && all < 150000, String(all));
-  assert.ok(all <= opps.reduce((a, o) => a + o.saving, 0));
+  assert.ok(all > 20000 && all < 100000, String(all));
+  assert.ok(all <= opps.reduce((a, o) => a + o.saving, 0) + 1);
+  const one = opps.find((o) => o.type === "small");
+  assert.ok(Math.abs(totalSaving(txs, [one]) - one.saving) < 1, "单独一条就等于它自己的可省");
   const ignored = Object.fromEntries(opps.map((o) => [o.id, "ignored"]));
   assert.equal(totalSaving(txs, opps, ignored), 0);
-  const impulse = opps.find((o) => o.type === "impulse");
-  const t = impulse.detail.items[0];
-  const reviewed = opportunities(txs, { reviews: { [t.id]: "no" } }).find((o) => o.type === "impulse");
+  const big = opps.find((o) => o.type === "big");
+  const t = big.detail.items[0];
+  const reviewed = opportunities(txs, { reviews: { [t.id]: "no" } }).find((o) => o.type === "big");
   assert.equal(reviewed.saving, t.amount);
 });
 

@@ -1,4 +1,4 @@
-"""SaveWise 后端：静态页面、账号、加密云同步、每周复盘、AI 代理（预算、限流、记账）。
+"""SaveWise 后端：静态页面、账号、加密云同步、定期复盘、AI 代理（预算、限流、记账）。
 流水的解析和分析在用户浏览器里完成；云同步的数据在浏览器里加密，服务器只存密文、解不开。"""
 import logging
 import re
@@ -10,12 +10,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import admin, costs, llm, notify, weekly
+from . import admin, costs, llm, notify, review
 from .auth import check_attempts, current_user, hash_pw, login_session, record_fail, send_reset, user_from_session, verify_pw
 from .config import (ADMIN_EMAILS, BASE_DIR, DEEPSEEK_API_KEY, INVITE_CODE, MODEL_DISCLOSURE, TIMEZONE, USER_DAILY_CALLS,
                      VAULT_MAX_MB, WEEKLY_RUN_TIME)
 from .db import get_conn, init_db
-from .prompts import CHAT_SYSTEM, CLASSIFY_SYSTEM, REVIEW_SYSTEM
+from .prompts import CHAT_SYSTEM, CLASSIFY_SYSTEM
 
 logging.basicConfig(level=logging.INFO)
 scheduler = BackgroundScheduler(timezone=TIMEZONE)
@@ -27,7 +27,8 @@ AUTH_RE = r"^[0-9a-f]{64}$"  # 浏览器由密码派生的登录口令（PBKDF2-
 async def lifespan(_app):
     init_db()
     hour, minute = WEEKLY_RUN_TIME.split(":")
-    scheduler.add_job(weekly.run, "cron", day_of_week="mon", hour=int(hour), minute=int(minute), id="weekly",
+    # 每天跑一次：按每个用户选的周期（周 / 月 / 季度）看上一期该不该生成复盘、发邮件或提醒
+    scheduler.add_job(review.run, "cron", hour=int(hour), minute=int(minute), id="review",
                       replace_existing=True, misfire_grace_time=3600 * 6)
     scheduler.start()
     yield
@@ -119,24 +120,27 @@ def me(user: dict = Depends(current_user)):
     with get_conn() as conn:
         vault = conn.execute("SELECT version, updated_at, LENGTH(data) AS size FROM vaults WHERE user_id = ?",
                              (user["id"],)).fetchone()
-        snap = conn.execute("SELECT week, updated_at FROM snapshots WHERE user_id = ?", (user["id"],)).fetchone()
+        legacy = conn.execute("SELECT COUNT(*) FROM weekly_reports WHERE user_id = ?", (user["id"],)).fetchone()[0]
     return {
-        "email": user["email"], "weekly_email": bool(user["weekly_email"]), "is_admin": user["role"] == "admin",
+        "email": user["email"], "weekly_email": bool(user["weekly_email"]), "cadence": user["cadence"] or "month",
+        "is_admin": user["role"] == "admin",
         "vault_version": vault["version"] if vault else 0, "vault_updated_at": vault["updated_at"] if vault else None,
-        "vault_size": vault["size"] if vault else 0, "snapshot_week": snap["week"] if snap else None,
+        "vault_size": vault["size"] if vault else 0, "legacy_recaps": legacy,
     }
 
 
 class Settings(BaseModel):
-    weekly_email: bool
+    weekly_email: bool | None = None   # 复盘提醒邮件开关（列名沿用 weekly_email）
+    cadence: str | None = Field(default=None, pattern="^(week|month|quarter)$")
 
 
 @app.put("/api/settings")
 def update_settings(body: Settings, user: dict = Depends(current_user)):
     with get_conn() as conn:
-        conn.execute("UPDATE users SET weekly_email = ? WHERE id = ?", (int(body.weekly_email), user["id"]))
-        if not body.weekly_email:
-            conn.execute("DELETE FROM snapshots WHERE user_id = ?", (user["id"],))  # 关掉后不再保留汇总
+        if body.weekly_email is not None:
+            conn.execute("UPDATE users SET weekly_email = ? WHERE id = ?", (int(body.weekly_email), user["id"]))
+        if body.cadence:
+            conn.execute("UPDATE users SET cadence = ? WHERE id = ?", (body.cadence, user["id"]))
     return {"ok": True}
 
 
@@ -280,7 +284,7 @@ def guard(user: dict) -> str:
 
 def context_text(context: dict) -> str:
     try:
-        return weekly.context_text(context)
+        return review.context_text(context)
     except ValueError as e:
         raise HTTPException(413, str(e)) from e
 
@@ -299,40 +303,45 @@ class ContextBody(BaseModel):
     context: dict
 
 
-@app.post("/api/ai/review")
-def ai_review(body: ContextBody, user: dict = Depends(current_user)):
+@app.post("/api/recaps/generate")
+def recap_generate(body: ContextBody, user: dict = Depends(current_user)):
+    """转给 AI 生成复盘，原样返回，汇总和复盘都不保存（复盘由浏览器加密后同步）。"""
     actor = guard(user)
-    messages = [{"role": "system", "content": REVIEW_SYSTEM},
-                {"role": "user", "content": "我的支出汇总：\n" + context_text(body.context)}]
-    return call(llm.chat_json, messages, temperature=0.4, max_tokens=1500, task="review", actor=actor)
+    context_text(body.context)
+    if not review.PERIOD_RE.fullmatch(str(body.context.get("period", ""))):
+        raise HTTPException(400, "缺少复盘的期")
+    return call(review.generate, body.context, "app", actor)
 
 
-@app.put("/api/weekly/snapshot")
-def weekly_snapshot(body: ContextBody, user: dict = Depends(current_user)):
-    """每次数据变了，浏览器把最近一个完整周的汇总传上来，周一的定时任务用它生成复盘。"""
-    if not user["weekly_email"]:
-        return {"ok": False}
+class RecapEmail(BaseModel):
+    report: dict
+
+
+@app.post("/api/recaps/email")
+def recap_email(body: RecapEmail, user: dict = Depends(current_user)):
+    """用户点了「发到我的邮箱」：发这一份，不保存。"""
+    if not notify.enabled():
+        raise HTTPException(503, "服务器还没有配置邮件")
+    if len(review.context_text(body.report)) > 20_000 or not review.PERIOD_RE.fullmatch(str(body.report.get("period", ""))):
+        raise HTTPException(400, "复盘内容不对")
     try:
-        weekly.save_snapshot(user["id"], body.context)
-    except ValueError as e:
-        raise HTTPException(413, str(e)) from e
+        costs.check_user_email(f"u{user['id']}")
+    except costs.BudgetExceeded as e:
+        raise HTTPException(429, str(e)) from e
+    review.email_report(user["email"], body.report)
     return {"ok": True}
 
 
-@app.post("/api/weekly/review")
-def weekly_review(body: ContextBody, user: dict = Depends(current_user)):
-    actor = guard(user)
-    context_text(body.context)
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(body.context.get("week", ""))):
-        raise HTTPException(400, "缺少周")
-    if user["weekly_email"]:
-        weekly.save_snapshot(user["id"], body.context)
-    return call(weekly.generate, user["id"], body.context, "app", actor)
+@app.get("/api/recaps/legacy")
+def recap_legacy(user: dict = Depends(current_user)):
+    """以前存在服务器上的复盘：浏览器取走、存进加密数据后调 DELETE 删掉。"""
+    return {"reports": review.legacy_reports(user["id"])}
 
 
-@app.get("/api/weekly")
-def weekly_list(user: dict = Depends(current_user)):
-    return {"reports": weekly.reports(user["id"])}
+@app.delete("/api/recaps/legacy")
+def recap_legacy_delete(user: dict = Depends(current_user)):
+    review.delete_legacy(user["id"])
+    return {"ok": True}
 
 
 class ChatMessage(BaseModel):

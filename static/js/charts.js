@@ -44,8 +44,8 @@ export function barChart(data, { width: W = 640, height = 220, fmt = String, lab
   return `<svg viewBox="0 0 ${W} ${height}" class="chart" role="img" aria-label="${esc(label)}">${s}</svg>`;
 }
 
-// 折线：points = [{label, value}]，标签只显示每年 1 月
-export function lineChart(points, { width: W = 640, height = 200, fmt = String, label = "", tickEvery = (p) => p.label.endsWith("-01") } = {}) {
+// 折线：points = [{label, value}]，默认标签只显示每年 1 月
+export function lineChart(points, { width: W = 640, height = 200, fmt = String, label = "", tickEvery = (p) => p.label.endsWith("-01"), tickText = (p) => p.label.slice(0, 4) } = {}) {
   const top = 12, bottom = height - 24, left = 56;
   const max = niceMax(Math.max(...points.map((p) => p.value), 0));
   const step = (W - left) / Math.max(1, points.length - 1);
@@ -53,7 +53,7 @@ export function lineChart(points, { width: W = 640, height = 200, fmt = String, 
   let s = grid(W, max, top, bottom, left, fmt);
   s += `<path d="M${xy.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join("L")}" class="line"/>`;
   points.forEach((p, i) => {
-    if (tickEvery(p)) s += `<text x="${xy[i][0]}" y="${height - 6}" text-anchor="middle" class="tick">${esc(p.label.slice(0, 4))}</text>`;
+    if (tickEvery(p)) s += `<text x="${xy[i][0]}" y="${height - 6}" text-anchor="middle" class="tick">${esc(tickText(p))}</text>`;
     // 每个点一条透明的竖条作为悬停区域，比点本身大得多
     s += `<rect x="${xy[i][0] - step / 2}" y="${top}" width="${Math.max(step, 2)}" height="${bottom - top}" class="hit" data-tip="${esc(`${p.label}：${fmt(p.value)}`)}" data-x="${xy[i][0]}" data-y="${xy[i][1]}"/>`;
   });
@@ -83,4 +83,59 @@ export function ledgerChart(rows, { width: W = 640, height = 200, fmt = String }
     if (rows.length <= 14 || i % 2 === 0) s += `<text x="${x + bw / 2}" y="${height - 6}" text-anchor="middle" class="tick">${esc(r.month.slice(2).replace("-", "/"))}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${height}" class="chart" role="img" aria-label="消费卡每月执行情况">${s}</svg>`;
+}
+
+// 多条折线（分类趋势）：labels = ["2026-01", ...]，series = [{label, slot, dash, values}]，共用一个纵轴。
+// 悬停一列显示这个月所有分类的金额。
+export function multiLineChart(labels, series, { width: W = 640, height = 220, fmt = String, label = "", tick = (l) => l.endsWith("-01") ? l.slice(0, 4) : "" } = {}) {
+  const top = 12, bottom = height - 24, left = 56;
+  const max = niceMax(Math.max(0, ...series.flatMap((s) => s.values)));
+  const step = (W - left) / Math.max(1, labels.length - 1);
+  const X = (i) => left + step * i, Y = (v) => bottom - ((bottom - top) * Math.max(0, v)) / max;
+  let s = grid(W, max, top, bottom, left, fmt);
+  labels.forEach((l, i) => { const t = tick(l, i); if (t) s += `<text x="${X(i)}" y="${height - 6}" text-anchor="middle" class="tick">${esc(t)}</text>`; });
+  for (const se of series) {
+    s += `<path d="M${se.values.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("L")}" class="s-line${se.dash ? " dash" : ""}" style="stroke:var(--series-${se.slot})"/>`;
+  }
+  labels.forEach((l, i) => {
+    const tip = [l, ...series.map((se) => `${se.label}：${fmt(se.values[i])}`)].join("\n");
+    s += `<rect x="${X(i) - step / 2}" y="${top}" width="${Math.max(step, 2)}" height="${bottom - top}" class="hit" data-tip="${esc(tip)}" data-xhair="${X(i)}"/>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${height}" class="chart line-chart" role="img" aria-label="${esc(label)}">${s}<line class="xhair hidden" y1="${top}" y2="${bottom}"/></svg>`;
+}
+
+// 分组柱（每年各分类）：groups = [{label, muted, tip}]，series = [{label, slot, values}]
+export function groupedBarChart(groups, series, { width: W = 640, height = 220, fmt = String, label = "" } = {}) {
+  const top = 16, bottom = height - 26, left = 56;
+  const max = niceMax(Math.max(0, ...series.flatMap((s) => s.values)));
+  const step = (W - left) / groups.length;
+  const n = series.length, gap = 2;
+  const bw = Math.max(3, Math.min(22, (step * 0.8 - gap * (n - 1)) / n));
+  const gw = bw * n + gap * (n - 1);
+  let s = grid(W, max, top, bottom, left, fmt);
+  groups.forEach((g, gi) => {
+    const x0 = left + step * gi + (step - gw) / 2;
+    series.forEach((se, si) => {
+      const v = se.values[gi], h = ((bottom - top) * Math.max(0, v)) / max, x = x0 + si * (bw + gap);
+      s += `<path d="${bar(x, bottom - h, bw, h, 3)}" class="gbar" style="fill:var(--series-${se.slot});${g.muted ? "opacity:.55" : ""}" data-tip="${esc(`${g.tip || g.label} ${se.label}：${fmt(v)}`)}"/>`;
+    });
+    s += `<text x="${x0 + gw / 2}" y="${height - 8}" text-anchor="middle" class="tick">${esc(g.label)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${height}" class="chart" role="img" aria-label="${esc(label)}">${s}</svg>`;
+}
+
+// 环形图（分类占比）：segments = [{label, value, slot}]，中间写标题和合计
+export function donut(segments, { size = 150, title = "", sub = "", fmt = String } = {}) {
+  const total = segments.reduce((a, b) => a + Math.max(0, b.value), 0) || 1;
+  const c = size / 2, r = size / 2 - 4, ri = r * 0.62;
+  let a0 = -Math.PI / 2, s = "";
+  const pt = (rad, a) => `${(c + rad * Math.cos(a)).toFixed(2)},${(c + rad * Math.sin(a)).toFixed(2)}`;
+  for (const seg of segments) {
+    if (seg.value <= 0) continue;
+    const f = seg.value / total, a1 = a0 + f * Math.PI * 2 - (f >= 1 ? 1e-4 : 0), large = f > 0.5 ? 1 : 0;
+    s += `<path d="M${pt(r, a0)}A${r},${r} 0 ${large} 1 ${pt(r, a1)}L${pt(ri, a1)}A${ri},${ri} 0 ${large} 0 ${pt(ri, a0)}Z" class="seg" style="fill:var(--series-${seg.slot})" data-tip="${esc(`${title} ${seg.label}：${fmt(seg.value)}（${Math.round(f * 100)}%）`)}"/>`;
+    a0 = a1;
+  }
+  s += `<text x="${c}" y="${c - 2}" text-anchor="middle" class="center">${esc(title)}</text><text x="${c}" y="${c + 14}" text-anchor="middle" class="center-sub">${esc(sub)}</text>`;
+  return `<svg viewBox="0 0 ${size} ${size}" class="chart" style="max-width:${size}px;margin:0 auto" role="img" aria-label="${esc(`${title} 分类占比`)}">${s}</svg>`;
 }

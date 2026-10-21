@@ -1,4 +1,4 @@
-// 后台：概览、用户、每周复盘。只看账号和用量，看不到任何人的流水
+// 后台：概览、用户、复盘。只看账号和用量，看不到任何人的流水
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -63,13 +63,12 @@ async function viewOverview() {
 async function viewUsers() {
   const d = await api("/api/admin/users");
   return `
-    <section class="card">${table(["用户", "角色", "云同步", "每周邮件", "复盘", "近 30 天 AI", "累计成本", "注册", "最近访问", "操作"], d.users.map((u) => `
+    <section class="card">${table(["用户", "角色", "云同步", "提醒邮件", "近 30 天 AI", "累计成本", "注册", "最近访问", "操作"], d.users.map((u) => `
       <tr class="${u.banned ? "muted" : ""}">
-        <td><b>${esc(u.email)}</b> <span class="muted small">#${u.id}</span>${u.banned ? ' <span class="badge t-impulse">已停用</span>' : ""}</td>
+        <td><b>${esc(u.email)}</b> <span class="muted small">#${u.id}</span>${u.banned ? ' <span class="badge t-big">已停用</span>' : ""}</td>
         <td>${u.role === "admin" ? `<span class="badge">管理员</span>${u.pinned_admin ? ' <span class="muted small" title="在 .env 的 ADMIN_EMAILS 中">固定</span>' : ""}` : '<span class="muted">用户</span>'}</td>
         <td class="num small">${u.synced_at ? `${esc(u.synced_at)}<br><span class="muted">${mb(u.vault_size)}</span>` : '<span class="muted">—</span>'}</td>
         <td>${u.weekly_email ? "开" : '<span class="muted">关</span>'}</td>
-        <td class="num">${u.reports}</td>
         <td class="num">${num(u.calls_30d)} 次</td>
         <td class="num">${yuan(u.cost_total)}</td>
         <td class="num small">${esc(u.created_at)}</td>
@@ -99,34 +98,31 @@ const userActions = {
   },
 };
 
-// ---------- 每周复盘 ----------
+// ---------- 复盘 ----------
+const CAD = { week: "按周", month: "按月", quarter: "按季度" };
 async function viewWeekly() {
   const d = await api("/api/admin/weekly");
-  const s = d.subscribers, run = d.run, last = run.last;
+  const run = d.run, last = run.last;
   if (run.running) setTimeout(() => location.hash === "#weekly" && render(), 5000);
   return `
     <section class="card">
-      <div class="card-head"><h2>周一定时任务</h2>
+      <div class="card-head"><h2>每日提醒任务</h2>
         <button class="primary" data-act="run" ${run.running ? "disabled" : ""}>${run.running ? "运行中…" : "立即补跑"}</button></div>
-      <p class="small">每周一 ${esc(d.run_time)}（北京时间）生成上周（${esc(d.last_week)} 那一周）的复盘并发邮件；快照还停在更早的周，就发一封“导入上周账单”的提醒。${d.email_enabled ? "" : '<span class="bad">服务器还没配置邮件，只生成不发送。</span>'}</p>
-      <p class="small">${last ? `最近一次运行：${esc(last.at)} · 生成 ${last.generated} · 发复盘 ${last.emailed} · 发提醒 ${last.reminded} · 跳过 ${last.skipped}${last.failed ? ` · <span class="bad">失败 ${last.failed}</span>` : ""}`
+      <p class="small">每天 ${esc(d.run_time)}（北京时间）按每个用户选的周期，上一期刚过完（按周 ${esc(d.last.week)} 那一周 · 按月 ${esc(d.last.month)} · 按季度 ${esc(d.last.quarter)}）就发一封提醒邮件，不含任何金额。复盘在用户浏览器里生成、加密同步，服务器上没有。${d.email_enabled ? "" : '<span class="bad">服务器还没配置邮件，不会发提醒。</span>'}</p>
+      <p class="small">${last ? `最近一次运行：${esc(last.at)} · 发提醒 ${last.reminded} · 跳过 ${last.skipped}${last.failed ? ` · <span class="bad">失败 ${last.failed}</span>` : ""}`
         : '<span class="muted">服务启动以来还没运行过</span>'}${run.error ? ` <span class="bad">${esc(run.error)}</span>` : ""}</p>
-      <p class="muted small">补跑不会重复发：已经发过邮件的用户会跳过，提醒每周最多一封。</p>
+      <p class="muted small">补跑不会重复发：每期只提醒一次。订阅周期：${Object.entries(d.by_cadence).map(([c, n]) => `${CAD[c] || esc(c)} ${n}`).join(" · ") || "—"}</p>
     </section>
     <div class="kpis compact">
-      <div class="stat"><div class="v">${s.subscribed}</div><div class="k">开启每周邮件</div></div>
-      <div class="stat"><div class="v">${s.ready}</div><div class="k">上周快照已就绪</div></div>
-      <div class="stat"><div class="v">${s.stale}</div><div class="k">快照停在更早的周</div></div>
-      <div class="stat"><div class="v">${s.no_snapshot}</div><div class="k">还没有快照</div></div>
-      <div class="stat"><div class="v">${s.reminded}</div><div class="k">本轮已发提醒</div></div>
-    </div>
-    <section class="card"><h2>近 12 周</h2>${table(["周（周一）", "复盘数", "页面生成", "定时生成", "已发邮件"], d.weeks.map((w) => `
-      <tr><td class="num">${esc(w.week)}</td><td class="num">${w.reports}</td><td class="num">${w.by_app}</td><td class="num">${w.by_job}</td><td class="num">${w.emailed}</td></tr>`))}</section>`;
+      <div class="stat"><div class="v">${d.subscribed}</div><div class="k">开启提醒邮件</div></div>
+      <div class="stat"><div class="v">${d.reminded}</div><div class="k">本期已提醒</div></div>
+      <div class="stat"><div class="v">${d.legacy}</div><div class="k">服务器上待迁移的旧复盘</div></div>
+    </div>`;
 }
 
 const weeklyActions = {
   async run() {
-    if (!confirm("现在补跑周一的定时任务？会逐个用户调用 AI 生成复盘并发邮件。")) return false;
+    if (!confirm("现在补跑每天的提醒任务？本期还没提醒过的用户会收到一封提醒邮件。")) return false;
     await api("/api/admin/weekly-run", { method: "POST" });
     toast("已开始，在后台运行");
   },

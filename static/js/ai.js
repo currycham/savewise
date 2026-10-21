@@ -1,8 +1,9 @@
 // 发给 AI 的只有汇总：按月、按分类的金额，可砍清单和计划。不发逐笔流水、账户、订单号。
-// 用户可以在页面上看到将要发送的完整内容。
+// 用户可以在页面上看到将要发送的完整内容，发过的也都记在本机的数据流向账里（outbox.js）。
 import { api } from "./account.js";
 import { TAXONOMY } from "./categorize.js";
 import { isSpend, spend } from "./analyze.js";
+import { logUpload } from "./outbox.js";
 import { addMonths, groupBy, monthOf, monthRange, round, sum } from "./util.js";
 
 const r = (n) => round(n);
@@ -30,11 +31,13 @@ export function buildContext(S, { month } = {}) {
     .filter((x) => x.thisMonth || x.monthlyAvg12 > 300).sort((a, b) => b.thisMonth - a.thisMonth).slice(0, 25);
 
   const ctx = {
-    period: { last12Months: `${w.start} ~ ${w.end}`, focusMonth: focus, dataUntil: w.last },
-    totals: { last12: r(ov.last12), previous12: r(ov.prev12), income12: r(ov.income12) },
+    period: { last12Months: `${w.start} ~ ${w.end}`, yearToDate: ov.ytd.label, focusMonth: focus, dataUntil: w.last },
+    // 一年的量看最近 12 个月；同比看今年同期 vs 去年同期（日历年）
+    totals: { last12: r(ov.last12), income12: r(ov.income12), yearToDate: r(ov.ytd.expense),
+      sameTimeLastYear: ov.ytd.hasPrev ? r(ov.ytd.prevExpense) : null, yearToDateIncome: r(ov.ytd.income) },
     byYear: ov.byYear.map((y) => ({ year: y.year, expense: r(y.expense), income: r(y.income), months: y.months })),
     fourKinds12: Object.fromEntries(Object.entries(ov.kindTotals).map(([k, v]) => [{ rigid: "固定刚性", fixedFlex: "固定弹性", daily: "高频弹性", lumpy: "偶发大额" }[k], r(v)])),
-    categories12: ov.cats.slice(0, 15).map((c) => ({ category: c.cat1, last12: r(c.last), previous12: r(c.before) })),
+    categories: ov.cats.slice(0, 15).map((c) => ({ category: c.cat1, last12: r(c.last), yearToDate: r(c.ytd), sameTimeLastYear: ov.ytd.hasPrev ? r(c.ytdPrev) : null })),
     monthly,
     focusMonthDetail: focusDetail,
     plan: plan && { annualTarget: plan.target, baseline: plan.baseline, monthlyCard: plan.cardMonthly, startMonth: plan.startMonth },
@@ -42,10 +45,10 @@ export function buildContext(S, { month } = {}) {
     opportunities: opps.slice(0, 15).map((o) => ({ title: o.title, estimatedAnnualSaving: r(o.saving), status: { todo: "待处理", doing: "决定去做", ignored: "已忽略" }[statuses[o.id] || "todo"] })),
     coolingOff: cooling.slice(-10).map((c) => ({ item: c.item, price: c.price, status: c.status })),
   };
-  const impulse = opps.find((o) => o.type === "impulse");
-  if (impulse) {
-    ctx.bigPurchases = impulse.detail.items.slice(0, 12).map((t) => ({
-      date: t.date, time: t.time, amount: r(t.amount), category: t.cat2, flags: t.flags,
+  const big = opps.find((o) => o.type === "big");
+  if (big) {
+    ctx.bigPurchases = big.detail.items.slice(0, 12).map((t) => ({
+      date: t.date, amount: r(t.amount), category: t.cat2,
       ...(settings.shareMerchants ? { merchant: t.merchant, note: t.note.slice(0, 30) } : {}),
       userReview: { yes: "值得", no: "不值", unsure: "说不清" }[t.review] || "未复盘",
     }));
@@ -58,19 +61,19 @@ export function buildContext(S, { month } = {}) {
   return ctx;
 }
 
-// AI 接口需要登录（内测期间凭邀请码注册），按用户限次
-const post = (path, body) => api("POST", path, body);
+// AI 接口需要登录（内测期间凭邀请码注册），按用户限次。每次发送都记进本机的数据流向账
+const post = async (path, body, kind, note) => { await logUpload(kind, body, note); return api("POST", path, body); };
 
-export const review = (context) => post("/api/ai/review", { context });
-export const chat = (context, messages) => post("/api/ai/chat", { context, messages });
-export const weeklyReview = (context) => post("/api/weekly/review", { context });
+export const chat = (context, messages) => post("/api/ai/chat", { context, messages }, "AI 提问", "支出汇总 + 最近的对话，转给 DeepSeek 回答，服务器不保存");
+export const recap = (context) => post("/api/recaps/generate", { context }, "生成复盘", "上一期的支出汇总，转给 DeepSeek 写复盘，服务器不保存");
+export const emailRecap = (report) => post("/api/recaps/email", { report }, "复盘发到邮箱", "你点了「发到我的邮箱」，发完不保存");
 
 // 未分类的商户交给 AI 归类：只发“交易对方 + 商品说明”文本，不发金额
 export async function classifyMerchants(texts) {
   const out = {};
   for (let i = 0; i < texts.length; i += 120) {
     const batch = texts.slice(i, i + 120);
-    const { items } = await post("/api/ai/classify", { items: batch, taxonomy: TAXONOMY });
+    const { items } = await post("/api/ai/classify", { items: batch, taxonomy: TAXONOMY }, "AI 归类", "未分类商户的名称和商品说明，不含金额");
     for (const it of items) out[batch[it.i]] = [it.cat1, it.cat2];
   }
   return out;

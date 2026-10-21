@@ -10,7 +10,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-# 注册邀请码（内测）：留空表示开放注册。不登录也能用本地分析，AI 教练和每周复盘需要登录
+# 注册邀请码（内测）：留空表示开放注册。不登录也能用本地分析，AI 教练和复盘需要登录
 INVITE_CODE = os.getenv("INVITE_CODE", "").strip()
 SITE_URL = os.getenv("SITE_URL", "https://savewise.waywise.tech").rstrip("/")
 # 这些邮箱注册或登录后自动成为管理员，后台在 /admin（逗号分隔）
@@ -32,13 +32,13 @@ DAILY_BUDGET_YUAN = float(os.getenv("DAILY_BUDGET_YUAN", "5"))
 USER_DAILY_CALLS = int(os.getenv("USER_DAILY_CALLS", "30"))
 TIMEZONE = "Asia/Shanghai"
 
-# ---------- 每周复盘 ----------
+# ---------- 定期复盘（每天跑一次，按用户选的周期） ----------
 # 每周一几点生成上周复盘并发邮件（北京时间）
 WEEKLY_RUN_TIME = os.getenv("WEEKLY_RUN_TIME", "08:00")
 # 云同步的密文上限（MB）。6 年流水压缩加密后通常不到 2MB
 VAULT_MAX_MB = float(os.getenv("VAULT_MAX_MB", "12"))
 
-# 邮件（每周复盘、找回密码）。腾讯云封了 25 端口，用 465（SSL）或 587（STARTTLS）
+# 邮件（复盘、找回密码）。腾讯云封了 25 端口，用 465（SSL）或 587（STARTTLS）
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USER = os.getenv("SMTP_USER", "")

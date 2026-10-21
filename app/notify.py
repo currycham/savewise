@@ -1,4 +1,4 @@
-"""发邮件：每周复盘、找回密码。"""
+"""发邮件：复盘、找回密码。"""
 import smtplib
 from email.message import EmailMessage
 from email.utils import formataddr

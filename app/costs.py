@@ -48,3 +48,16 @@ def record(task: str, actor: str, cost: float, prompt: int = 0, cached: int = 0,
                          " VALUES (?, ?, ?, ?, ?, ?)", (task, actor, prompt, cached, completion, cost))
     except Exception:
         log.exception("record usage failed")  # 记账失败不影响主流程
+
+
+EMAILS_PER_DAY = 5
+
+
+def check_user_email(actor: str) -> None:
+    """「发到我的邮箱」每人每天最多几封，防止被拿来刷邮件。只记次数，记在 llm_usage 里（成本 0）。"""
+    with get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM llm_usage WHERE task = 'recap-email' AND actor = ? AND at >= ?",
+                         (actor, today_start_utc())).fetchone()[0]
+    if n >= EMAILS_PER_DAY:
+        raise BudgetExceeded(f"今天已经发了 {EMAILS_PER_DAY} 封，明天再发")
+    record("recap-email", actor, 0)

@@ -14,11 +14,16 @@
   --warn: #b86e00;
   --warn-bg: #fff6e0;
   --neutral-bg: #f0f3f2;
-  /* 图表分类色（四象限），顺序固定，深色模式单独取值 */
+  /* 图表分类色：顺序固定（相邻两色对色弱也分得开），深色模式单独取值。四象限用 1~4，分类图用 1~8 */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
   --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+  --series-other: #a3aaa8;
   --chart-mark: #0f7b6c;
   --chart-muted: #a9cfc7;
   --grid: #e8ecea;
@@ -31,6 +36,7 @@
     --good: #45c97f; --good-bg: #1a3325; --bad: #ff6b5e; --bad-bg: #3a2220; --warn: #f2b33d; --warn-bg: #3a3020;
     --neutral-bg: #262b2a;
     --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; --series-other: #5c6462;
     --chart-mark: #3fb39f; --chart-muted: #2f5b53; --grid: #2a302e; --axis: #3d4542;
   }
 }
@@ -151,13 +157,13 @@ main, .landing { max-width: 1080px; margin: 0 auto; padding: 20px 16px 40px; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
 .tooltip {
   position: fixed; z-index: 50; pointer-events: none; background: var(--text); color: var(--bg);
-  padding: 5px 9px; border-radius: 6px; font-size: 12px; max-width: 280px;
+  padding: 5px 9px; border-radius: 6px; font-size: 12px; max-width: 280px; white-space: pre-line;
 }
 
 /* 表格 */
 .tbl { overflow-x: auto; }
-.tbl table, .impulse table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.tbl th, .tbl td, .impulse td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.tbl table, .biglist table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl th, .tbl td, .biglist td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .tbl th { color: var(--muted); font-weight: 500; white-space: nowrap; }
 .tbl th.num, .tbl td.num { text-align: right; }
 .cat-row { cursor: pointer; }
@@ -172,6 +178,27 @@ main, .landing { max-width: 1080px; margin: 0 auto; padding: 20px 16px 40px; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 14px; }
 .chip { padding: 3px 12px; border-radius: 999px; font-size: 13px; }
 .chip.on { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+.chip .sw { margin-right: 5px; vertical-align: -1px; }
+.chip.on .sw { box-shadow: 0 0 0 1.5px var(--card); }
+
+/* 分类趋势、分类占比 */
+.chart .s-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .s-line.dash { stroke-dasharray: 5 4; }
+.chart .xhair { stroke: var(--axis); stroke-width: 1; }
+.chart .seg { stroke: var(--card); stroke-width: 2; }
+.chart .seg:hover, .chart .gbar:hover { opacity: .8; }
+.chart .center { fill: var(--text); font-size: 13px; font-weight: 700; }
+.chart .center-sub { fill: var(--muted); font-size: 11px; }
+.trend-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.trend-tools select, .chips select { width: auto; }
+.seg-ctl { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg-ctl button { border: 0; border-radius: 0; padding: 4px 12px; font-size: 13px; }
+.seg-ctl button.on { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.donuts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 14px; }
+.donuts figure { margin: 0; text-align: center; }
+.donuts figcaption { font-size: 12px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin: 8px 0 4px; }
+.cut-ctl { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .opp.doing { border-color: var(--good); }
 .opp.ignored { opacity: .55; }
 .opp-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -181,11 +208,11 @@ main, .landing { max-width: 1080px; margin: 0 auto; padding: 20px 16px 40px; }
 .opp-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 6px; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 4px; font-weight: 600; background: var(--primary-soft); color: var(--primary); white-space: nowrap; }
-.badge.t-impulse { background: var(--bad-bg); color: var(--bad); }
+.badge.t-big { background: var(--bad-bg); color: var(--bad); }
 .badge.t-subscription { background: var(--warn-bg); color: var(--warn); }
-.impulse { margin-top: 8px; max-height: 460px; overflow-y: auto; }
-.impulse td.review { white-space: nowrap; text-align: right; }
-.impulse .tag { margin-top: 2px; display: inline-block; }
+.biglist { margin-top: 8px; max-height: 460px; overflow-y: auto; }
+.biglist td.review { white-space: nowrap; text-align: right; }
+.biglist .tag { margin-top: 2px; display: inline-block; }
 .bar { height: 8px; background: var(--neutral-bg); border-radius: 4px; overflow: hidden; margin: 6px 0; }
 .bar i { display: block; height: 100%; background: var(--good); border-radius: 4px; }
 .bar i.warn { background: var(--bad); }
@@ -277,3 +304,12 @@ dialog h3 { margin: 0 0 12px; }
   .topbar .nav { order: 3; flex-basis: 100%; }
   #btn-account { max-width: 110px; }
 }
+
+/* 隐私 */
+.privacy-promise { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: 12px; padding: 12px 16px; margin-top: 14px; font-size: 14px; }
+.privacy-promise ul { margin: 6px 0 8px; padding-left: 20px; color: var(--muted); }
+.privacy-list { padding-left: 20px; margin: 6px 0; }
+.privacy-list li { margin: 6px 0; }
+.outbox details { border-bottom: 1px solid var(--border); padding: 6px 0; }
+.outbox summary { cursor: pointer; font-size: 13px; }
+.outbox pre { max-height: 300px; overflow: auto; background: var(--neutral-bg); padding: 8px; border-radius: 6px; font-size: 11px; white-space: pre-wrap; word-break: break-all; }

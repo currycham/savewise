@@ -78,9 +78,10 @@ export function mergeBundles(a, b) {
     tx[d.id] = fresh;
   }
   const out = { ...b, ...a, datasets, tx };
-  for (const k of ["kinds", "statuses", "reviews", "catOverrides", "goalChecks"]) out[k] = { ...(b[k] || {}), ...(a[k] || {}) };
+  for (const k of ["kinds", "statuses", "reviews", "cuts", "catOverrides", "goalChecks"]) out[k] = { ...(b[k] || {}), ...(a[k] || {}) };
   const byId = (xs, ys, key) => { const m = new Map(); for (const x of [...(ys || []), ...(xs || [])]) m.set(key(x), x); return [...m.values()]; };
   out.cooling = byId(a.cooling, b.cooling, (c) => c.id);
+  out.recaps = byId(a.recaps, b.recaps, (r) => r.period);
   out.reports = byId(a.reports, b.reports, (r) => `${r.month}|${r.at}`).sort((x, y) => x.at - y.at);
   out.chatLog = a.chatLog?.length ? a.chatLog : b.chatLog || [];
   // 计划：手动改过的优先（auto=false），两边都改过就用本机的
