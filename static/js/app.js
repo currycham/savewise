@@ -877,6 +877,7 @@ function updateAccountUI() {
   const b = $("#btn-account");
   b.textContent = S.account ? `${S.sync.state === "error" ? "⚠ " : S.sync.state === "syncing" ? "☁️ " : ""}${S.account.email.split("@")[0]}` : "登录";
   b.title = S.account ? `${S.account.email}${S.sync.error ? ` · 同步失败：${S.sync.error}` : ""}` : "登录后每周收到复盘邮件，多设备加密同步";
+  $("#btn-admin").classList.toggle("hidden", !S.me?.is_admin);
 }
 
 let syncTimer;
@@ -1203,6 +1204,7 @@ document.addEventListener("click", (e) => {
   if (c) c.closest("dialog").close();
 });
 $("#btn-import").onclick = openImport;
+$("#btn-admin").onclick = () => { location.href = "/admin"; };
 $("#btn-account").onclick = () => { if (!S.account) return openAccount("login"); location.hash = "#data"; setTimeout(() => $("#account")?.scrollIntoView({ behavior: "smooth" }), 50); };
 $("#acc-form").onsubmit = submitAccount;
 $("#pick").onclick = (e) => { e.preventDefault(); $("#file-input").click(); };

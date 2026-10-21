@@ -79,12 +79,12 @@ label.check input { width: auto; margin: 0; }
   position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 16px; padding: 10px max(16px, calc((100vw - 1080px) / 2));
 }
-.brand { font-weight: 800; font-size: 18px; color: var(--text); text-decoration: none; white-space: nowrap; }
+.brand { font-weight: 800; font-size: 18px; color: var(--text); text-decoration: none; white-space: nowrap; margin-right: auto; }
 .brand span { font-weight: 500; color: var(--primary); font-size: 14px; margin-left: 4px; }
 .nav { display: flex; gap: 2px; overflow-x: auto; flex: 1; scrollbar-width: none; }
 .nav a { padding: 6px 12px; border-radius: 8px; color: var(--text); text-decoration: none; white-space: nowrap; }
 .nav a.on { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
-.small-btn { white-space: nowrap; margin-left: auto; }
+.small-btn { white-space: nowrap; }
 .demo-bar { background: var(--warn-bg); color: var(--text); text-align: center; padding: 8px 16px; font-size: 13px; }
 
 main, .landing { max-width: 1080px; margin: 0 auto; padding: 20px 16px 40px; }
