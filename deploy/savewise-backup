@@ -1,5 +1,5 @@
 #!/bin/sh
-# 每天备份 SQLite（账号、云同步密文、每周汇总和复盘、AI 记账）（在线热备份，不停服务），保留 14 天。由 setup-server.sh 安装到 /etc/cron.daily/
+# 每天备份 SQLite（账号、云同步密文、AI 调用记账；没有明文的支出数据）（在线热备份，不停服务），保留 14 天。由 setup-server.sh 安装到 /etc/cron.daily/
 set -e
 DIR=/srv/savewise/backup
 DB=/srv/savewise/data/savewise.db
