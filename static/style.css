@@ -313,3 +313,8 @@ dialog h3 { margin: 0 0 12px; }
 .outbox details { border-bottom: 1px solid var(--border); padding: 6px 0; }
 .outbox summary { cursor: pointer; font-size: 13px; }
 .outbox pre { max-height: 300px; overflow: auto; background: var(--neutral-bg); padding: 8px; border-radius: 6px; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+.rn-opts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0; }
+.rn-preview { background: var(--neutral-bg); border-radius: 8px; padding: 4px 14px 10px; margin: 8px 0; font-size: 14px; }
+.rn-preview h4 { margin: 10px 0 4px; font-size: 14px; }
+.rn-preview ul { margin: 0; padding-left: 18px; }
+.rn-mid { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 8px; }

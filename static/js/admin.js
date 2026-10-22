@@ -108,14 +108,15 @@ async function viewWeekly() {
     <section class="card">
       <div class="card-head"><h2>每日提醒任务</h2>
         <button class="primary" data-act="run" ${run.running ? "disabled" : ""}>${run.running ? "运行中…" : "立即补跑"}</button></div>
-      <p class="small">每天 ${esc(d.run_time)}（北京时间）按每个用户选的周期，上一期刚过完（按周 ${esc(d.last.week)} 那一周 · 按月 ${esc(d.last.month)} · 按季度 ${esc(d.last.quarter)}）就发一封提醒邮件，不含任何金额。复盘在用户浏览器里生成、加密同步，服务器上没有。${d.email_enabled ? "" : '<span class="bad">服务器还没配置邮件，不会发提醒。</span>'}</p>
-      <p class="small">${last ? `最近一次运行：${esc(last.at)} · 发提醒 ${last.reminded} · 跳过 ${last.skipped}${last.failed ? ` · <span class="bad">失败 ${last.failed}</span>` : ""}`
+      <p class="small">每天 ${esc(d.run_time)}（北京时间）按每个用户选的周期，上一期刚过完（按周 ${esc(d.last.week)} 那一周 · 按月 ${esc(d.last.month)} · 按季度 ${esc(d.last.quarter)}）就发一封提醒邮件；用户在网页里勾选了提醒内容的，邮件里带上那几行字（默认不含金额），发出后删掉。复盘在用户浏览器里生成、加密同步，服务器上没有。${d.email_enabled ? "" : '<span class="bad">服务器还没配置邮件，不会发提醒。</span>'}</p>
+      <p class="small">${last ? `最近一次运行：${esc(last.at)} · 发提醒 ${last.reminded}（带内容 ${last.with_note ?? 0}）· 期中提醒 ${last.mid ?? 0} · 跳过 ${last.skipped}${last.failed ? ` · <span class="bad">失败 ${last.failed}</span>` : ""}`
         : '<span class="muted">服务启动以来还没运行过</span>'}${run.error ? ` <span class="bad">${esc(run.error)}</span>` : ""}</p>
       <p class="muted small">补跑不会重复发：每期只提醒一次。订阅周期：${Object.entries(d.by_cadence).map(([c, n]) => `${CAD[c] || esc(c)} ${n}`).join(" · ") || "—"}</p>
     </section>
     <div class="kpis compact">
       <div class="stat"><div class="v">${d.subscribed}</div><div class="k">开启提醒邮件</div></div>
       <div class="stat"><div class="v">${d.reminded}</div><div class="k">本期已提醒</div></div>
+      <div class="stat"><div class="v">${d.notes.total}</div><div class="k">存着的提醒内容（带金额 ${d.notes.amounts} · 要期中提醒 ${d.notes.mid}）</div></div>
       <div class="stat"><div class="v">${d.legacy}</div><div class="k">服务器上待迁移的旧复盘</div></div>
     </div>`;
 }

@@ -1,5 +1,5 @@
 // 离线缓存：联网时总是取最新的（避免新旧脚本混用），断网时用缓存，照样能打开看自己的数据（AI 功能需要联网）
-const CACHE = "savewise-v3";
+const CACHE = "savewise-v4";
 const CORE = ["/", "/static/style.css", "/static/js/app.js", "/static/icon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

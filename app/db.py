@@ -1,5 +1,6 @@
 """服务器存的东西（没有任何明文的流水、汇总或复盘）：
 - 账号（邮箱 + 由密码在浏览器里派生出的登录口令的哈希，服务器拿不到密码本身）、复盘周期和提醒邮件开关
+- 提醒邮件里的几行字（用户在页面上看过原文、勾选后才上传，默认不带金额），到期发出就删
 - 云同步密文（流水、计划、复盘都在浏览器里加密，密钥不离开浏览器，服务器解不开）
 - AI 调用记账（次数和成本，用于预算和限流；不记发送的内容）
 """
@@ -48,6 +49,15 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     emailed_at TEXT,
     UNIQUE (user_id, week)
+);
+-- 下一封提醒邮件里写什么：浏览器算好的几行字（[{title, lines}]），用户勾选后上传。期末那封发出后整行删掉
+CREATE TABLE IF NOT EXISTS reminder_notes (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    period TEXT NOT NULL,              -- 这一期（日历上上传时所在的期），这一期过完时发 final
+    level TEXT NOT NULL,               -- text：不带金额；amounts：带金额
+    final TEXT NOT NULL,               -- 期末那封的内容（JSON）
+    mid TEXT,                          -- 期中那封的内容（JSON），不要期中提醒或已发出为 NULL
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY,

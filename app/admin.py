@@ -166,6 +166,7 @@ def recap_stats():
     with get_conn() as conn:
         subs = conn.execute("SELECT cadence, reminded_week FROM users WHERE weekly_email = 1 AND banned = 0").fetchall()
         legacy = conn.execute("SELECT COUNT(*) FROM weekly_reports").fetchone()[0]
+        notes = conn.execute("SELECT level, mid IS NOT NULL AS mid FROM reminder_notes").fetchall()
     by_cadence: dict[str, int] = {}
     reminded = 0
     for u in subs:
@@ -174,7 +175,8 @@ def recap_stats():
         reminded += u["reminded_week"] == review.last_period(c)
     return {"last": {c: review.last_period(c) for c in review.CADENCES}, "run_time": WEEKLY_RUN_TIME,
             "email_enabled": notify.enabled(), "subscribed": len(subs), "reminded": reminded, "by_cadence": by_cadence,
-            "legacy": legacy, "run": {**_run_state, "last": review.last_result}}
+            "legacy": legacy, "notes": {"total": len(notes), "amounts": sum(n["level"] == "amounts" for n in notes),
+                                        "mid": sum(n["mid"] for n in notes)}, "run": {**_run_state, "last": review.last_result}}
 
 
 @router.post("/weekly-run")

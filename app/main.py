@@ -126,6 +126,7 @@ def me(user: dict = Depends(current_user)):
         "is_admin": user["role"] == "admin",
         "vault_version": vault["version"] if vault else 0, "vault_updated_at": vault["updated_at"] if vault else None,
         "vault_size": vault["size"] if vault else 0, "legacy_recaps": legacy,
+        "reminder_note": review.get_note(user["id"]),
     }
 
 
@@ -141,6 +142,40 @@ def update_settings(body: Settings, user: dict = Depends(current_user)):
             conn.execute("UPDATE users SET weekly_email = ? WHERE id = ?", (int(body.weekly_email), user["id"]))
         if body.cadence:
             conn.execute("UPDATE users SET cadence = ? WHERE id = ?", (body.cadence, user["id"]))
+            if body.cadence != user["cadence"]:  # 换了周期，存好的提醒内容对不上了
+                conn.execute("DELETE FROM reminder_notes WHERE user_id = ?", (user["id"],))
+    return {"ok": True}
+
+
+class NoteSection(BaseModel):
+    title: str = Field(max_length=40)
+    lines: list[str] = Field(min_length=1, max_length=8)
+
+
+class ReminderNote(BaseModel):
+    period: str
+    level: str = Field(pattern="^(text|amounts)$")
+    final: list[NoteSection] = Field(max_length=4)
+    mid: list[NoteSection] | None = Field(default=None, max_length=4)
+
+
+@app.put("/api/reminder-note")
+def put_reminder_note(body: ReminderNote, user: dict = Depends(current_user)):
+    """下一封提醒邮件里写的几行字：用户在页面上看过原文、勾选后上传。期末那封发出后删掉。"""
+    cadence = user["cadence"] or "month"
+    if body.period != review.current_period(cadence):
+        raise HTTPException(400, "提醒对应的期不对，刷新页面再试")
+    sections = body.final + (body.mid or [])
+    if any(len(x) > 160 for s in sections for x in s.lines):
+        raise HTTPException(400, "提醒内容太长了")
+    review.save_note(user["id"], body.period, body.level, [s.model_dump() for s in body.final],
+                     [s.model_dump() for s in body.mid] if body.mid else None)
+    return {"ok": True, "note": review.get_note(user["id"])}
+
+
+@app.delete("/api/reminder-note")
+def delete_reminder_note(user: dict = Depends(current_user)):
+    review.delete_note(user["id"])
     return {"ok": True}
 
 

@@ -6,6 +6,7 @@ import { demoTransactions } from "./demo.js";
 import { $, $$, download, esc, hash } from "./dom.js";
 import { readFiles } from "./files.js";
 import { clearOutbox, logUpload, readOutbox } from "./outbox.js";
+import { LEVELS, PARTS, REMINDER_DEFAULTS, reminderNote } from "./reminder.js";
 import { DEFAULTS, isSpend, opportunities, overview, spend, totalSaving } from "./analyze.js";
 import { SOURCES, txKey } from "./parse.js";
 import { cardLedger, defaultPlan, freedomFund, lumpyStatus } from "./plan.js";
@@ -58,6 +59,7 @@ async function boot() {
   fetch("/api/public-config").then((r) => r.json()).then((c) => {
     S.config = c;
     if (c.model_disclosure) $("#disclosure").textContent = c.model_disclosure;
+    if (S.ov && location.hash === "#review") route(); // 「发到我的邮箱」、提醒内容要看服务器配没配邮件
   }).catch(() => {});
   if (!(await store.persistent())) toast("浏览器不允许本地存储（可能是隐私模式），刷新后数据会丢失", 6000);
   updateAccountUI();
@@ -695,7 +697,7 @@ function accountSection() {
   if (!S.account) return `<section class="card" id="account">
     <div class="card-head"><h2>账号</h2><span class="actions"><button class="primary" data-action="register">注册</button><button data-action="login">登录</button></span></div>
     <ul class="muted small benefits">
-      <li>按你选的周期（周 / 月 / 季度），每期初发一封提醒邮件，不含任何金额</li>
+      <li>按你选的周期（周 / 月 / 季度），每期初发一封提醒邮件，只带你勾选的几行字，默认不含金额</li>
       <li>多台设备同步。流水、计划、复盘在浏览器里用你的密码加密后再上传，服务器只存密文，解不开</li>
       <li>不登录也能用全部本地分析 · <a href="#privacy">我们怎么保护你的隐私 →</a></li>
     </ul></section>`;
@@ -707,7 +709,7 @@ function accountSection() {
     <div class="card-head"><h2>账号</h2><span class="muted small">${esc(S.account.email)}</span></div>
     <p class="small">☁️ ${status}${S.me?.vault_size ? `<span class="muted"> · 云端密文 ${(S.me.vault_size / 1048576).toFixed(1)}MB</span>` : ""}</p>
     <label class="check"><input type="checkbox" id="s-weekly" ${S.me?.weekly_email ? "checked" : ""} ${S.me ? "" : "disabled"}> 每${CADENCES[S.settings.cadence].unit}初早上 8 点发一封复盘提醒邮件（周期在「复盘」页改）${S.config.email_enabled ? "" : "<span class=\"muted small\">（服务器还没配置邮件）</span>"}</label>
-    <p class="muted small">提醒邮件不含任何金额。服务器只知道你的邮箱和复盘周期，不保存你的汇总或复盘。</p>
+    <p class="muted small">提醒邮件里写什么在「复盘」页最下面选，默认不带金额。服务器只知道你的邮箱、复盘周期和你勾选进提醒邮件的几行字，不保存你的汇总或复盘。</p>
     <div class="actions">
       <button id="a-pw">修改密码</button>
       <button id="a-logout">退出登录</button>
@@ -830,7 +832,7 @@ function viewReview() {
     <div class="card-head"><h2>复盘周期</h2><span class="seg-ctl">${Object.entries(CADENCES).map(([c, v]) => `<button data-cad="${c}" class="${c === cad ? "on" : ""}">${v.name}</button>`).join("")}</span></div>
     <p class="muted small">复盘、目标、提醒邮件都按这个周期。按月最省心：月初导一次账单，和每月消费卡对得上。</p>
   </section>
-  ${S.account ? "" : loginCard(`每${C.unit}初提醒你复盘`, `登录后：每${C.unit}初收到一封提醒邮件（不含任何金额），复盘和目标在多台设备间加密同步。内测期间凭邀请码注册。`)}
+  ${S.account ? "" : loginCard(`每${C.unit}初提醒你复盘`, `登录后：每${C.unit}初收到一封提醒邮件（你的目标、快续费的订阅，默认不带金额），复盘和目标在多台设备间加密同步。内测期间凭邀请码注册。`)}
   ${behind ? `<section class="card warn-card"><b>最新的数据到 ${last}，${periodName(calLast)}的账单还没导入。</b> 导入后才能复盘${C.last}。
     <span class="muted small">微信：我 → 服务 → 钱包 → 账单 → 常见问题 → 下载账单；收到的 zip 直接拖进来。</span>
     ${S.demo ? "" : `<button class="primary" data-action="import">导入账单</button>`}</section>` : ""}
@@ -869,6 +871,8 @@ function viewReview() {
 
   ${history.length ? `<section class="card"><details><summary>以前的复盘（${history.length}）</summary>
     ${history.map((r) => `<div class="muted small" style="margin-top:14px">${periodName(r.period)}</div>${recapCard(r)}`).join("")}</details></section>` : ""}
+
+  ${reminderCard()}
 
   ${S.me?.weekly_email ? "" : `<p class="muted small center">不用邮件的话，也可以 <a href="#" id="w-ics">把“每${C.unit}初复盘”加到日历</a>。</p>`}`;
 }
@@ -923,6 +927,10 @@ bind.viewReview = () => {
       const rep = await ai.recap(periodContext(S, key));
       S.recaps = S.recaps.filter((r) => r.period !== key).concat({ ...rep, at: Date.now() });
       await save("recaps");
+      const p = reminderPrefs();
+      if (p.everSaved && p.auto && p.level !== "none" && S.me?.weekly_email) {
+        await uploadNote().then(() => toast("复盘好了，提醒邮件里的目标也按你的勾选更新了"), (e) => toast(`提醒内容没更新：${e.message}`, 5000));
+      }
     } catch (e) { toast(e.message, 5000); }
     aiBusy = false; route();
   };
@@ -939,7 +947,85 @@ bind.viewReview = () => {
     route();
   }));
   if ($("#w-ics")) $("#w-ics").onclick = (e) => { e.preventDefault(); calendar(cad); };
+  bindReminder();
 };
+
+// ---------- 提醒邮件里写什么 ----------
+// 浏览器算好几行字，用户看过原文、点了保存才上传；服务器到期发出就删。默认不带金额
+const reminderPrefs = () => ({ ...REMINDER_DEFAULTS, ...(S.settings.reminder || {}) });
+const noteHtml = (sections) => sections.map((s) => `<h4>${esc(s.title)}</h4><ul>${s.lines.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`).join("");
+
+function reminderCard() {
+  const p = reminderPrefs(), note = reminderNote(S, p), saved = S.me?.reminder_note;
+  const today = ymd(new Date()), live = S.account && !S.demo && S.config.email_enabled;
+  const status = !S.account ? "登录后才能用：提醒邮件只发给登录的账号。"
+    : S.demo ? "现在看的是演示数据，不能保存。"
+    : !S.config.email_enabled ? "服务器还没配置邮件。"
+    : saved ? `服务器上现在存着 ${periodName(saved.period)} 的提醒内容（${LEVELS[saved.level]}，${new Date(`${saved.created_at.replace(" ", "T")}Z`).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 保存${saved.mid ? "，含期中那封" : ""}）${saved.period !== note.period ? "，已经过期，下次发信时删掉" : ""}。`
+    : "服务器上没有存任何提醒内容。";
+  return `<section class="card" id="rn">
+    <div class="card-head"><h2>提醒邮件里写什么</h2><span class="seg-ctl">${Object.entries(LEVELS).map(([k, v]) => `<button data-rl="${k}" class="${k === p.level ? "on" : ""}">${v}</button>`).join("")}</span></div>
+    <p class="muted small">${periodName(note.period)}过完那天早上发。下面就是要上传的原文，是浏览器从你的历史数据里算出来的；点「保存」才上传，邮件发出后服务器上就删了。</p>
+    ${p.level === "none" ? `<p class="muted">邮件只说「${periodName(note.period)}过完了，来复盘一下」，不带任何内容。</p>` : `
+    <div class="rn-opts small">${Object.entries(PARTS).map(([k, v]) => `<label class="check"><input type="checkbox" data-rp="${k}" ${p[k] ? "checked" : ""}> ${v}</label>`).join("")}
+      <label class="check"><input type="checkbox" id="rn-mid" ${p.mid ? "checked" : ""} ${today >= note.midDate ? "disabled" : ""}> 期中再提醒一次（${Number(note.midDate.slice(5, 7))}/${Number(note.midDate.slice(8))}${today >= note.midDate ? "，这期已经过了" : ""}）</label></div>
+    <div class="rn-preview">${note.final.length ? noteHtml(note.final) : `<p class="muted small">现在没有能写的内容。生成复盘、定了目标以后，目标会出现在这里；有按年续费的订阅、去年这时候的大额，也会列出来。</p>`}
+      ${note.mid ? `<div class="muted small rn-mid">期中那封（${Number(note.midDate.slice(5, 7))}/${Number(note.midDate.slice(8))}）</div>${noteHtml(note.mid)}` : ""}</div>`}
+    <p class="small muted">${status}${S.me && !S.me.weekly_email ? ` <span class="bad">你关掉了提醒邮件，在「数据 → 账号」里打开后才会发。</span>` : ""}</p>
+    ${live ? `<div class="actions">
+      ${p.level === "none" ? "" : `<button class="primary" id="rn-save" ${note.final.length || note.mid ? "" : "disabled"}>${saved?.period === note.period ? "更新提醒内容" : "保存到提醒邮件"}</button>`}
+      ${saved ? `<button class="ghost" id="rn-del">删掉服务器上存的内容</button>` : ""}
+      ${p.everSaved && p.level !== "none" ? `<label class="check small"><input type="checkbox" id="rn-auto" ${p.auto ? "checked" : ""}> 以后每次生成复盘，按同样的勾选自动更新</label>` : ""}
+    </div>` : ""}
+  </section>`;
+}
+
+async function setReminderPrefs(patch) {
+  S.settings.reminder = { ...reminderPrefs(), ...patch };
+  await store.set("settings", S.settings);
+}
+
+async function uploadNote() {
+  const { period, level, final, mid } = reminderNote(S, reminderPrefs());
+  const body = { period, level, final, mid };
+  await logUpload("提醒邮件内容", body, "你勾选进提醒邮件的几行字，以明文存在服务器上，邮件发出后删掉");
+  const r = await acct.api("PUT", "/api/reminder-note", body);
+  S.me.reminder_note = r.note;
+}
+
+async function deleteNote() {
+  await acct.api("DELETE", "/api/reminder-note");
+  S.me.reminder_note = null;
+}
+
+function refreshReminderCard() {
+  if ($("#rn") && S.ov) { $("#rn").outerHTML = reminderCard(); bindReminder(); }
+}
+
+function bindReminder() {
+  const redraw = refreshReminderCard;
+  $$("[data-rl]").forEach((b) => (b.onclick = async () => {
+    await setReminderPrefs({ level: b.dataset.rl });
+    // 选了「不带内容」：服务器上存着的立刻删掉
+    if (b.dataset.rl === "none" && S.me?.reminder_note) await deleteNote().then(() => toast("服务器上存的提醒内容删掉了"), (e) => toast(e.message, 5000));
+    redraw();
+  }));
+  $$("[data-rp]").forEach((c) => (c.onchange = async () => { await setReminderPrefs({ [c.dataset.rp]: c.checked }); redraw(); }));
+  if ($("#rn-mid")) $("#rn-mid").onchange = async (e) => { await setReminderPrefs({ mid: e.target.checked }); redraw(); };
+  if ($("#rn-auto")) $("#rn-auto").onchange = async (e) => { await setReminderPrefs({ auto: e.target.checked }); };
+  if ($("#rn-save")) $("#rn-save").onclick = async () => {
+    try {
+      await uploadNote();
+      await setReminderPrefs({ everSaved: true });
+      toast(`存好了，${periodName(S.me.reminder_note.period)}过完那天早上随提醒邮件发出`);
+    } catch (e) { toast(e.message, 5000); }
+    redraw();
+  };
+  if ($("#rn-del")) $("#rn-del").onclick = async () => {
+    try { await deleteNote(); toast("删掉了，提醒邮件只说该复盘了"); } catch (e) { toast(e.message, 5000); }
+    redraw();
+  };
+}
 
 // 日历提醒（.ics）：每周一 / 每月 1 号 / 每季度第一天 20:00
 function calendar(cadence) {
@@ -961,7 +1047,7 @@ const PRIVACY_ROWS = [
   ["计划、可砍清单的选择、复盘、目标、AI 问答记录", "同上：浏览器 + 云端密文", "只有你"],
   ["邮箱、复盘周期、提醒开关", "服务器", "我们（用来登录、发提醒）"],
   ["AI 用到的汇总（按月、按分类的金额，不含逐笔流水）", "不保存：经服务器转给 DeepSeek，拿到回答就丢掉", "DeepSeek 处理这一次请求"],
-  ["复盘提醒邮件", "不含任何金额", "你的邮箱服务商"],
+  ["提醒邮件里的几行字（你勾选的目标、要续费的订阅、去年这时候的大额，默认不带金额）", "你点「保存」才上传，以明文存在服务器上，邮件发出后删掉（最长一个复盘周期）", "我们、你的邮箱服务商"],
   ["「发到我的邮箱」的复盘", "只在你点了按钮时发一次，发完不保存", "你的邮箱服务商"],
 ];
 
@@ -973,7 +1059,7 @@ function viewPrivacy() {
     <h2>你的账单，只有你看得到</h2>
     <p><b>账单在你的浏览器里解析，不上传。</b>不登录时，数据只存在这台设备上。</p>
     <p><b>登录后，数据先在你的浏览器里用你的密码加密，再同步到云端。</b>服务器只存一串密文，钥匙只在你的设备上——我们解不开，也不能替你找回。</p>
-    <p><b>服务器上没有任何明文的流水、汇总或复盘。</b>AI 只在你点按钮时收到一份按月、按分类的汇总，用完就丢；提醒邮件不含任何金额。</p>
+    <p><b>服务器上没有任何明文的流水、汇总或复盘。</b>AI 只在你点按钮时收到一份按月、按分类的汇总，用完就丢；提醒邮件只带你看过、勾选的几行字，默认不带金额。</p>
   </section>
 
   <section class="card">
@@ -991,7 +1077,7 @@ function viewPrivacy() {
       <li><b>端到端加密</b>（和密码管理器 Bitwarden 同一种做法）：你的密码在浏览器里派生出两把钥匙，一把用来登录（服务器只存它的哈希），一把用来加密数据（AES-256-GCM），后者从不离开你的设备。</li>
       <li><b>网页只能连本站</b>：页面设置了内容安全策略（CSP），脚本无法把数据发到别的网站；所有代码都从本站加载，不用第三方 CDN 和统计脚本。</li>
       <li><b>AI 只看汇总</b>：发给 AI 的是“外卖这个月 ¥800、去年同期 ¥650”这样的汇总，不发逐笔流水、账户、订单号；商户名可以在「数据 → 设置」里关掉。服务器只记调用次数和成本，不记内容。</li>
-      <li><b>邮件不带金额</b>：每期初的提醒只说“该复盘了”。想把复盘发到邮箱，要你自己点按钮，发完不保存。</li>
+      <li><b>邮件里写什么由你定</b>：每期初的提醒默认只带几行不含金额的字——你定的目标、快要续费的订阅、去年这时候交过的大额。这些字在浏览器里算好，你在「复盘」页看过原文、点了保存才上传，邮件发出就删；也可以选「不带内容」，邮件只说该复盘了。想把完整复盘发到邮箱，要你自己点按钮，发完不保存。</li>
     </ul>
   </section>
 
@@ -1017,7 +1103,7 @@ function viewPrivacy() {
     <ul class="privacy-list muted">
       <li>忘了密码，我们没法帮你解开云端数据：重设密码后云端密文会清空，在存有数据的设备上登录一次就会重新同步。</li>
       <li>用 AI 时，那一次的汇总会经过我们的服务器转给 DeepSeek，由 DeepSeek 按它的隐私政策处理。</li>
-      <li>邮件会经过你的邮箱服务商，所以提醒邮件里不放金额。</li>
+      <li>邮件会经过你的邮箱服务商，所以提醒邮件默认不放金额。你勾选进提醒邮件的那几行字，从保存到发出（最长一个复盘周期）以明文存在我们的服务器上。</li>
     </ul>
   </section>
   ${S.txs.length ? "" : `<p class="center"><a href="#" data-action="import">导入账单</a> · <a href="#" data-action="demo">先看演示数据</a> · <a href="#" id="pv-home">回首页</a></p>`}`;
@@ -1120,6 +1206,7 @@ async function syncAccount() {
   try {
     S.me = await acct.api("GET", "/api/me");
     await adoptCadence();
+    refreshReminderCard();
   } catch (e) {
     if (e.status === 401) sessionLost(); else setSync("error", "连不上服务器");
     return;
